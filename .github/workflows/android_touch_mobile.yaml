@@ -132,11 +132,30 @@ jobs:
           gn gen "out/${PLATFORM}_${CONFIG}"
           gn args --list --short --overrides-only "out/${PLATFORM}_${CONFIG}"
 
+      - name: Create debug signing keystore
+        shell: bash
+        working-directory: cobalt/src
+        run: |
+          set -ex
+          # //cobalt/android:cobalt_apk signs with keystore_path "../../../../.android/debug.keystore"
+          # (alias androiddebugkey, password android). GN clamps the path at the source root, so
+          # ninja expects cobalt/src/.android/debug.keystore. It is not in the repo; generate a
+          # throwaway standard Android debug key (APKs from different runs won't upgrade each other).
+          mkdir -p .android
+          KEYTOOL=third_party/jdk/current/bin/keytool
+          [ -x "${KEYTOOL}" ] || KEYTOOL=keytool
+          "${KEYTOOL}" -genkeypair -v -keystore .android/debug.keystore -storepass android \
+            -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          df -h .
+
       - name: Build cobalt_apk
         shell: bash
         working-directory: cobalt/src
         run: |
           set -ex
+          # Print disk usage every 10 min so a disk-full failure is visible in the log.
+          ( while sleep 600; do df -h . | tail -1; done ) &
           autoninja -C "out/${PLATFORM}_${CONFIG}" cobalt/android:cobalt_apk
           ls -la "out/${PLATFORM}_${CONFIG}/apks/" || true
 
