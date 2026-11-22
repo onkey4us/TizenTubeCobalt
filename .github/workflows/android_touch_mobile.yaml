@@ -138,13 +138,17 @@ jobs:
         run: |
           set -ex
           # //cobalt/android:cobalt_apk signs with keystore_path "../../../../.android/debug.keystore"
-          # (alias androiddebugkey, password android). GN clamps the path at the source root, so
-          # ninja expects cobalt/src/.android/debug.keystore. It is not in the repo; generate a
-          # throwaway standard Android debug key (APKs from different runs won't upgrade each other).
-          mkdir -p .android
+          # (alias androiddebugkey, password android). Ninja resolves it relative to the out dir
+          # out/android-arm64_<config>, i.e. FOUR levels up: ${GITHUB_WORKSPACE}/.android/ (outside
+          # the cobalt/src checkout; run 45050054350 failed with the key in cobalt/src/.android/).
+          # Not in the repo; generate a throwaway standard Android debug key (APKs from different
+          # runs won't upgrade each other).
+          KS_DIR="$(realpath -m "out/${PLATFORM}_${CONFIG}/../../../../.android")"
+          echo "keystore dir: ${KS_DIR}"
+          mkdir -p "${KS_DIR}"
           KEYTOOL=third_party/jdk/current/bin/keytool
           [ -x "${KEYTOOL}" ] || KEYTOOL=keytool
-          "${KEYTOOL}" -genkeypair -v -keystore .android/debug.keystore -storepass android \
+          "${KEYTOOL}" -genkeypair -v -keystore "${KS_DIR}/debug.keystore" -storepass android \
             -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
           df -h .
