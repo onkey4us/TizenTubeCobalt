@@ -186,7 +186,10 @@ try {
   await sleep(100);
   check('speed from sheet applied', (await ev(`document.querySelector('#movie_player video').playbackRate`)) === 2);
   check('Back handler closes sheet', (await ev(`window.__tizentubeMobileHandleBack()`)) === true && (await ev(`!document.getElementById('ttm-sheet')`)));
-  check('Back handler returns false when nothing to close', (await ev(`window.__tizentubeMobileHandleBack()`)) === false);
+  // With the 25_layout module, Back first leaves the landscape fill (if a video put the
+  // page into it), and only then reports "nothing to close" so the app does history.back().
+  const backFill = await ev(`(() => { const wasFill = TTM.layout.mode !== 'off'; const r1 = window.__tizentubeMobileHandleBack(); return { wasFill, r1, r2: window.__tizentubeMobileHandleBack() }; })()`);
+  check('Back handler: exits fill first (if any), then returns false', backFill.r2 === false && backFill.r1 === backFill.wasFill, JSON.stringify(backFill));
   // Fallback location: overflow sheet when account menu closed.
   await ev(`document.body.click()`);
   await sleep(100);
@@ -198,6 +201,64 @@ try {
   await sleep(2000);
   check('settings survive reload', (await ev(`TTM.settings.speed`)) === 2);
   await ev(`localStorage.clear()`);
+
+  // ---------------------------------------------------- designer v4 checks
+  check('open-in-app button hidden', await ev(`getComputedStyle(document.getElementById('mock-open-app')).display === 'none'`));
+  // Landscape fill: play video -> header hidden, player covers the viewport.
+  await ev(`(() => { localStorage.clear(); })()`);
+  await send('Page.reload'); await sleep(2000);
+  await ev(`document.querySelector('#movie_player video').play().catch(()=>{})`);
+  await sleep(800);
+  const fill = await ev(`(() => { const r = document.getElementById('player-container-id').getBoundingClientRect();
+    const v = document.querySelector('#movie_player video').getBoundingClientRect();
+    return { mode: TTM.layout.mode, cls: document.documentElement.classList.contains('ttm-fill'),
+      header: getComputedStyle(document.getElementById('header-bar')).display, r: [r.left, r.top, r.width, r.height],
+      v: [v.left, v.top, v.width, v.height], fit: getComputedStyle(document.querySelector('#movie_player video')).objectFit,
+      vw: innerWidth, vh: innerHeight }; })()`);
+  check('landscape auto-fill: player covers viewport, header hidden',
+    (fill.mode === 'fill' || fill.mode === 'real') && fill.cls && fill.header === 'none' && fill.r[0] === 0 && fill.r[1] === 0 &&
+    fill.r[2] === fill.vw && fill.r[3] === fill.vh && fill.v[2] === fill.vw && fill.v[3] === fill.vh && fill.fit === 'cover', JSON.stringify(fill));
+  // Toast contrast: compute WCAG ratio over a white backdrop (worst case).
+  await ev(`TTM.player.showSkipToast({ category: 'sponsor' }, function () {})`);
+  const contrast = await ev(`(() => {
+    const parse = c => c.match(/[\\d.]+/g).map(Number);
+    const lum = ([r, g, b]) => { const f = x => (x /= 255) <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    const over = (fg, bg) => { const a = fg[3] === undefined ? 1 : fg[3]; return [0, 1, 2].map(i => fg[i] * a + bg[i] * (1 - a)); };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    const t = document.getElementById('ttm-skip-toast'), b = t.querySelector('button');
+    const ts = getComputedStyle(t), bs = getComputedStyle(b);
+    const bg = parse(ts.backgroundColor), bgOnWhite = over(bg, [255, 255, 255]);
+    const btnBg = over(parse(bs.backgroundColor), bgOnWhite);
+    return { alpha: bg[3], text: +ratio(parse(ts.color), bgOnWhite).toFixed(2), button: +ratio(parse(bs.color), btnBg).toFixed(2), weight: +bs.fontWeight }; })()`);
+  check('toast ~85% opaque, text and bold "Hoàn tác" ≥ 4.5:1 even over white', contrast.alpha >= 0.8 && contrast.text >= 4.5 && contrast.button >= 4.5 && contrast.weight >= 700, JSON.stringify(contrast));
+  // Settings sheet: ✕, 85vh, scrollable body; Back closes sheet first, then fill.
+  await ev(`TTM.settingsUi.open()`);
+  await sleep(200);
+  const sh = await ev(`(() => { const s = document.getElementById('ttm-sheet'), b = s.querySelector('.ttm-body'), x = s.querySelector('.ttm-x');
+    const r = s.getBoundingClientRect(), xr = x.getBoundingClientRect();
+    const intro = [...b.querySelectorAll('label')].find(l => l.textContent.includes('Mở đầu'));
+    return { h: r.height, vh: innerHeight, top: r.top, bottom: r.bottom, scrollable: b.scrollHeight > b.clientHeight,
+      x: [xr.width, xr.height, Math.round(xr.right - r.right), Math.round(xr.top - r.top)], hasIntro: !!intro }; })()`);
+  check('settings sheet ≤ 85vh, inside viewport, body scrolls, ✕ ≥ 48px top-right',
+    sh.h <= sh.vh * 0.851 && sh.top >= 0 && sh.bottom <= sh.vh && sh.scrollable && sh.x[0] >= 48 && sh.x[1] >= 48 && sh.x[2] <= 0 && sh.x[2] > -16 && sh.x[3] < 16 && sh.hasIntro, JSON.stringify(sh));
+  // Touch-drag inside the sheet body scrolls it and is not taken as a volume swipe.
+  const vBefore = await ev(`TizenTubeMobile.getVolume()`);
+  const bb = await ev(`(() => { const r = document.querySelector('#ttm-sheet .ttm-body').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * 0.75, r.top + r.height * 0.2]; })()`);
+  // Raw touch drag (Input.synthesizeScrollGesture is a no-op in headless).
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb[0], y: bb[1] }] });
+  for (let i = 1; i <= 20; i++) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: bb[0], y: bb[1] + (bb[2] - bb[1]) * i / 20 }] }); await sleep(16); }
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(400);
+  const scrolled = await ev(`document.querySelector('#ttm-sheet .ttm-body').scrollTop`);
+  check('touch scroll in sheet scrolls body, no volume change', scrolled > 20 && (await ev(`TizenTubeMobile.getVolume()`)) === vBefore, 'scrollTop=' + scrolled);
+  await ev(`document.querySelector('#ttm-sheet .ttm-x').click()`);
+  check('✕ closes the sheet', await ev(`!document.getElementById('ttm-sheet')`));
+  await ev(`TTM.settingsUi.open()`);
+  check('Back #1 closes sheet (fill stays)', (await ev(`window.__tizentubeMobileHandleBack()`)) === true && (await ev(`!document.getElementById('ttm-sheet') && TTM.layout.mode !== 'off'`)));
+  const back2 = await ev(`window.__tizentubeMobileHandleBack()`);
+  const modeAfter = await ev(`TTM.layout.mode`);
+  check('Back #2 exits fill mode', modeAfter === 'off' || (back2 === false && modeAfter === 'real'), 'back2=' + back2 + ' mode=' + modeAfter);
+  check('header visible again after exit', modeAfter !== 'off' || (await ev(`getComputedStyle(document.getElementById('header-bar')).display !== 'none'`)));
 
   const errs = consoleMsgs.filter(m => /EXCEPTION|^error/.test(m) && !/JSDelivr/.test(m));
   check('no JS exceptions / console errors', errs.length === 0, errs.join(' | '));

@@ -33,14 +33,19 @@
   // ---------------------------------------------------------------- toast
   TTM.addStyle([
     '#ttm-skip-toast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);',
+    // Contrast (designer v4): ~85% opaque black, pure white text, bold bright button.
+    // Worst case (white video behind): background ≈ #262626, text 15:1, button 9:1.
     'z-index:2147483646;display:flex;align-items:center;gap:12px;max-width:90vw;',
-    'padding:6px 6px 6px 16px;border-radius:24px;background:rgba(28,28,28,.92);color:#fff;',
-    'font:500 14px/1.3 Roboto,Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);',
+    'padding:6px 6px 6px 18px;border-radius:24px;background:rgba(0,0,0,.85);color:#fff;',
+    'border:1px solid rgba(255,255,255,.22);',
+    'font:500 15px/1.3 Roboto,Arial,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.6);',
+    'text-shadow:0 1px 2px rgba(0,0,0,.6);',
     'opacity:0;pointer-events:none;transition:opacity .2s}',
     '#ttm-skip-toast.ttm-show{opacity:1;pointer-events:auto}',
-    '#ttm-skip-toast button{min-width:48px;min-height:40px;padding:0 14px;border:0;border-radius:20px;',
-    'background:transparent;color:#3ea6ff;font:600 14px Roboto,Arial,sans-serif;cursor:pointer}',
-    '#ttm-skip-toast button:active{background:rgba(255,255,255,.12)}'
+    '#ttm-skip-toast button{min-width:48px;min-height:40px;padding:0 16px;border:0;border-radius:20px;',
+    'background:rgba(138,196,255,.22);color:#a8d4ff;font:700 15px Roboto,Arial,sans-serif;',
+    'letter-spacing:.2px;cursor:pointer}',
+    '#ttm-skip-toast button:active{background:rgba(138,196,255,.4)}'
   ].join(''));
 
   var toastEl = null, toastTimer = 0, toastUndo = null;

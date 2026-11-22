@@ -9,15 +9,32 @@
  * by //cobalt/shell:embed_polyfilled_javascript and injected at document start
  * (all frames, all origins) by Shell::RegisterInjectedJavaScript() in
  * cobalt/shell/browser/shell.cc. They run in file-name order (std::map), and
- * only do work in the top frame of m.youtube.com (or in the test harness).
+ * only do work in the top frame of an allowed YouTube host (see isAllowedLocation).
  * See docs/TOUCH_MOBILE.md.
  */
 (function () {
   'use strict';
+  /**
+   * Host guard. The polyfill directory is injected into EVERY document and frame
+   * (AddDocumentStartJavaScript with origin "*"), including accounts.google.com and
+   * other Google sign-in / consent pages reached from m.youtube.com. This userscript
+   * must be a no-op there: no hooks (JSON.parse, fetch), no DOM, no styles.
+   *  - Only the youtube.com web hosts below. music.youtube.com, studio, *.google.com,
+   *    accounts.*, consent.* are all rejected.
+   *  - Not under /tv: the leanback app has its own (jsdelivr) userscript.
+   *  - The harness flag is honoured only on a local origin, so a page cannot opt in.
+   */
+  var ALLOWED_HOSTS = { 'm.youtube.com': 1, 'www.youtube.com': 1, 'youtube.com': 1 };
+  function isAllowedLocation(loc, harnessFlag) {
+    if (!loc || /^\/tv(\/|$)/.test(loc.pathname || '')) return false;
+    if (Object.prototype.hasOwnProperty.call(ALLOWED_HOSTS, loc.hostname)) {
+      return loc.protocol === 'https:';
+    }
+    return !!harnessFlag && (loc.protocol === 'file:' || loc.hostname === 'localhost' ||
+      loc.hostname === '127.0.0.1');
+  }
   if (window.top !== window) return;
-  var host = location.hostname;
-  var isHarness = !!window.__TIZENTUBE_MOBILE_HARNESS__;
-  if (host !== 'm.youtube.com' && !isHarness) return;
+  if (!isAllowedLocation(location, window.__TIZENTUBE_MOBILE_HARNESS__)) return;
   if (window.TTM) return;
 
   /** Tunables. Times in ms, distances in CSS px. */
@@ -46,7 +63,12 @@
     sbCategories: { sponsor: true, selfpromo: true, interaction: true, intro: false,
       outro: false, preview: false, music_offtopic: true, filler: false },
     speed: 1,
-    gestures: true
+    gestures: true,
+    // Landscape: fill the screen when a video plays (real fullscreen, CSS fallback).
+    autoFullscreen: true,
+    // In fill mode crop the video to the screen (object-fit: cover) instead of
+    // showing black side bars on 20:9 phones.
+    fillCrop: true
   };
 
   /** Vietnamese UI strings. */
@@ -59,6 +81,8 @@
     speed: 'Tốc độ phát mặc định',
     speedNormal: 'Bình thường',
     gestures: 'Vuốt dọc chỉnh độ sáng / âm lượng',
+    autoFullscreen: 'Tự động toàn màn hình khi xem (màn ngang)',
+    fillCrop: 'Phủ kín màn hình (cắt bớt mép video)',
     close: 'Đóng',
     undo: 'Hoàn tác',
     volume: 'Âm lượng',
@@ -202,7 +226,7 @@
     } catch (e) { /* not running in Cobalt */ }
   });
 
-  window.TTM = {
+  var TTM_OBJ = {
     CONFIG: CONFIG, DEFAULTS: DEFAULTS, STRINGS: STRINGS,
     get settings() { return settings; },
     setSetting: setSetting, saveSettings: saveSettings,
@@ -210,8 +234,13 @@
     onReady: onReady, overlayParent: overlayParent, addStyle: addStyle, log: log,
     el: el, svgIcon: svgIcon,
     // Back handlers registered by modules; see __tizentubeMobileHandleBack.
-    backHandlers: []
+    // The LAST registered runs FIRST (settings sheet before layout fill).
+    backHandlers: [],
+    isAllowedLocation: isAllowedLocation
   };
+  // Pin the binding so page scripts cannot swap it out (the object stays extensible
+  // because later modules attach TTM.adblock, TTM.player, ...).
+  Object.defineProperty(window, 'TTM', { value: TTM_OBJ, writable: false, configurable: false });
 
   // Called by CobaltActivity.handleMobileBack() before history.back().
   // Returns true when a TizenTube overlay consumed the Back press.

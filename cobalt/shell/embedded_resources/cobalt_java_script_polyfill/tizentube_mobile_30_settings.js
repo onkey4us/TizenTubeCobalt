@@ -42,10 +42,20 @@
     '.ttm-entry svg{width:24px;height:24px;flex:none;fill:currentColor}',
     '#ttm-sheet-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);',
     'display:flex;align-items:center;justify-content:center}',
-    '#ttm-sheet{width:min(520px,92vw);max-height:88vh;overflow:auto;border-radius:12px;',
+    // Landscape phones are ~360-412 CSS px tall: cap at 85% of the viewport, keep the
+    // header (title + ✕) fixed and scroll only the body (designer v4).
+    '#ttm-sheet{display:flex;flex-direction:column;width:min(520px,92vw);max-height:85vh;',
+    'max-height:85dvh;overflow:hidden;border-radius:12px;',
     'background:#212121;color:#f1f1f1;font:400 14px/1.4 Roboto,Arial,sans-serif;',
     'box-shadow:0 4px 24px rgba(0,0,0,.5)}',
-    '#ttm-sheet h2{margin:0;padding:16px 16px 8px;font-size:18px;font-weight:500}',
+    '#ttm-sheet .ttm-head{flex:none;display:flex;align-items:center;justify-content:space-between;',
+    'gap:8px;padding:0 4px 0 16px;min-height:52px;border-bottom:1px solid rgba(255,255,255,.1)}',
+    '#ttm-sheet h2{margin:0;font-size:18px;font-weight:500}',
+    '#ttm-sheet .ttm-x{flex:none;width:48px;height:48px;border:0;border-radius:24px;background:transparent;',
+    'color:#fff;font:400 22px/48px Roboto,Arial,sans-serif;cursor:pointer;padding:0}',
+    '#ttm-sheet .ttm-x:active{background:rgba(255,255,255,.15)}',
+    '#ttm-sheet .ttm-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;',
+    '-webkit-overflow-scrolling:touch;touch-action:pan-y}',
     '#ttm-sheet h3{margin:8px 0 0;padding:8px 16px 4px;font-size:13px;font-weight:500;color:#aaa}',
     '#ttm-sheet label{display:flex;align-items:center;justify-content:space-between;gap:16px;',
     'min-height:48px;padding:0 16px;cursor:pointer}',
@@ -54,7 +64,8 @@
     '#ttm-sheet input[type=checkbox]{width:22px;height:22px;accent-color:#3ea6ff;flex:none}',
     '#ttm-sheet select{min-height:40px;min-width:140px;border-radius:8px;background:#333;color:#fff;',
     'border:1px solid #555;font-size:14px;padding:0 8px}',
-    '#ttm-sheet .ttm-actions{display:flex;justify-content:flex-end;padding:8px}',
+    '#ttm-sheet .ttm-actions{flex:none;display:flex;justify-content:flex-end;padding:8px;',
+    'border-top:1px solid rgba(255,255,255,.1)}',
     '#ttm-sheet .ttm-actions button{min-height:48px;min-width:96px;border:0;border-radius:24px;',
     'background:#3ea6ff;color:#0f0f0f;font:500 14px Roboto,Arial,sans-serif;cursor:pointer}'
   ].join(''));
@@ -156,9 +167,14 @@
     sheet.setAttribute('role', 'dialog');
     sheet.setAttribute('aria-modal', 'true');
     sheet.setAttribute('aria-label', S.settingsTitle);
-    var h = document.createElement('h2');
-    h.textContent = S.settingsTitle;
-    sheet.appendChild(h);
+    var x = TTM.el('button', { type: 'button', 'class': 'ttm-x', 'aria-label': S.close, title: S.close }, ['✕']);
+    x.addEventListener('click', function (e) { e.preventDefault(); closeSheet(); });
+    sheet.appendChild(TTM.el('div', { 'class': 'ttm-head' }, [TTM.el('h2', null, [S.settingsTitle]), x]));
+    var body = TTM.el('div', { 'class': 'ttm-body' });
+    sheet.appendChild(body);
+    // All rows go into the scrollable body.
+    var sheetRoot = sheet;
+    sheet = body;
 
     sheet.appendChild(checkbox(S.adblock, st.adblock, function (v) { TTM.setSetting('adblock', v); }));
 
@@ -203,6 +219,10 @@
     sheet.appendChild(speedLabel);
 
     sheet.appendChild(checkbox(S.gestures, st.gestures, function (v) { TTM.setSetting('gestures', v); }));
+    sheet.appendChild(checkbox(S.autoFullscreen, st.autoFullscreen,
+      function (v) { TTM.setSetting('autoFullscreen', v); }));
+    sheet.appendChild(checkbox(S.fillCrop, st.fillCrop, function (v) { TTM.setSetting('fillCrop', v); }));
+    sheet = sheetRoot;
 
     var actions = document.createElement('div');
     actions.className = 'ttm-actions';

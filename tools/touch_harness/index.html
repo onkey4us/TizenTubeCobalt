@@ -20,12 +20,16 @@
 <body>
 <div id="app">
   <!-- Mock m.youtube.com header -->
-  <header class="mock-header">
+  <!-- Same structure as m.youtube.com's topbar (ytm-mobile-topbar-renderer#header-bar). -->
+  <ytm-mobile-topbar-renderer id="header-bar" class="mock-header">
     <span class="logo">▶ YouTube</span>
     <span class="spacer"></span>
+    <div class="mobile-topbar-header-sign-in-button">
+      <ytm-button-renderer class="icon-avatar_logged_out" id="mock-open-app"><a href="intent://m.youtube.com/#Intent;scheme=vnd.youtube;end">Mở ứng dụng</a></ytm-button-renderer>
+    </div>
     <button id="search-btn" class="icon-btn" aria-label="Tìm kiếm">⌕</button>
     <button id="avatar-btn" class="avatar" aria-label="Tài khoản">A</button>
-  </header>
+  </ytm-mobile-topbar-renderer>
   <div id="search-bar" hidden>
     <input id="search-input" type="search" placeholder="Tìm kiếm trên YouTube" autocomplete="off">
   </div>

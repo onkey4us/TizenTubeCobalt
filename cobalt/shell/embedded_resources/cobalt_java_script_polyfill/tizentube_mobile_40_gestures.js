@@ -129,6 +129,10 @@
     '[data-ttm-player]';
   var CONTROL_SELECTOR = '.ytp-progress-bar, .ytp-chrome-bottom, .ytm-progress-bar, ' +
     'ytm-progress-bar, .player-controls-bottom, .ytm-autonav-bar, [data-ttm-no-gesture]';
+  // Our own overlays. In fullscreen they live inside the player element, so without
+  // this a vertical drag in the settings sheet was taken as a volume swipe and its
+  // scrolling was blocked by preventDefault.
+  var OVERLAY_SELECTOR = '#ttm-sheet-backdrop, #ttm-skip-toast, #ttm-level';
   var g = null;  // Active touch: {id, x0, y0, rect, kind, start, claimed, player, video}.
   var pending = null, rafQueued = false;
 
@@ -140,6 +144,7 @@
     g = null;
     if (!TTM.settings.gestures || e.touches.length !== 1) return;
     var t = e.touches[0];
+    if (e.target.closest && e.target.closest(OVERLAY_SELECTOR)) return;
     var player = findPlayer(e.target);
     if (!player || (e.target.closest && e.target.closest(CONTROL_SELECTOR))) return;
     var video = player.querySelector('video');

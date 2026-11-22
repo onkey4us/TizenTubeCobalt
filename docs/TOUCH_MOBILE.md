@@ -20,7 +20,7 @@ thanh nút nổi.
 | Toàn màn hình | Immersive (ẩn thanh trạng thái + thanh điều hướng, vuốt từ mép để hiện tạm) | Theo wireframe. |
 | Nút Back | Back = `history.back()` của trang; ở trang gốc thì đưa app xuống nền | Hành vi trình duyệt, thay cho phím Escape của TV. |
 | Bàn phím ảo | Sửa đường IME để bàn phím Android gõ được vào `<input>` | Cobalt TV không bao giờ cần, nên đường này chưa từng được nối. |
-| Userscript | 5 module JS đóng gói trong APK, chèn lúc document start | Không phụ thuộc jsdelivr khi chạy. |
+| Userscript | 6 module JS đóng gói trong APK, chèn lúc document start | Không phụ thuộc jsdelivr khi chạy. |
 | Splash TV | `cobalt.ENABLE_SPLASH_SCREEN=false` | Splash là trang của youtube.com/tv. |
 
 ### Công tắc khôi phục giao diện TV
@@ -77,14 +77,23 @@ cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
   tizentube_mobile_00_core.js      cấu hình, cài đặt (localStorage), chuỗi tiếng Việt, tiện ích DOM, xử lý Back
   tizentube_mobile_10_adblock.js   chặn quảng cáo
   tizentube_mobile_20_player.js    SponsorBlock + thông báo "Hoàn tác", tốc độ phát mặc định
+  tizentube_mobile_25_layout.js    màn ngang tự phủ kín màn hình, ẩn "Mở ứng dụng"
   tizentube_mobile_30_settings.js  mục "Cài đặt TizenTube" trong menu tài khoản + bảng cài đặt
   tizentube_mobile_40_gestures.js  vuốt dọc: độ sáng (trái) / âm lượng (phải)
 ```
 
 * Thứ tự chạy là thứ tự tên file (bản đồ `std::map` trong `generate_data_header.py`), nên có tiền tố số.
 * Các file được liệt kê trong `inputs` của action (`cobalt/shell/BUILD.gn`) để sửa file thì bước build chạy lại.
-* Mỗi module tự thoát nếu không phải frame trên cùng của `m.youtube.com` (hoặc harness).
-  `00_core` định nghĩa `window.TTM`, các module sau dựa vào nó.
+* **Chặn theo host** (`isAllowedLocation` trong `00_core`): polyfill được chèn vào **mọi** trang và
+  frame, kể cả `accounts.google.com` khi người dùng đăng nhập. Userscript chỉ chạy ở frame trên cùng
+  của `https://m.youtube.com`, `https://www.youtube.com`, `https://youtube.com`, và không chạy dưới
+  `/tv`. Trên mọi host khác (`accounts.google.com`, `accounts.youtube.com`, `consent.*`,
+  `myaccount.google.com`, `music.youtube.com`, `studio.youtube.com`, tên miền giả như
+  `m.youtube.com.evil.example`, `http:`) nó là no-op: không tạo `window.TTM`, không hook
+  `JSON.parse`/`fetch`, không chạm DOM. Cờ harness chỉ được nhận trên `localhost`/`127.0.0.1`/`file:`.
+  `window.TTM` được ghim bằng `defineProperty` (không ghi đè được). Kiểm thử:
+  `node tools/touch_harness/host_guard_test.mjs` (23 URL) và trên accounts.google.com thật (mục 12).
+* `00_core` định nghĩa `window.TTM`, các module sau dựa vào nó.
 * Userscript jsdelivr (đường 1) **bị bỏ qua trên `m.youtube.com`**: đây là thay đổi duy nhất trong
   Blink, một điều kiện host ở `document.cc:4019`
   (`IsA<HTMLDocument>(this) && Url().Host() != "m.youtube.com"`). Nếu không bỏ, script TV sẽ chạy
@@ -121,7 +130,9 @@ Rủi ro: YouTube đổi tên khoá/thẻ thường xuyên. Khi quảng cáo l�
   404 nghĩa là video không có đoạn nào.
 * Loại đang bật (mặc định: tài trợ, tự quảng bá, nhắc tương tác, không phải nhạc) được bỏ qua tự
   động; đoạn `mute` thì tắt tiếng trong khoảng đó.
-* Khi bỏ qua, hiện thông báo ở **dưới** màn hình trong **4 giây** kèm nút **"Hoàn tác"**:
+* Khi bỏ qua, hiện thông báo ở **dưới** màn hình trong **4 giây** kèm nút **"Hoàn tác"**. Nền đen
+  đục 85%, chữ trắng 15px; "Hoàn tác" đậm (700), màu xanh sáng `#a8d4ff` trên nền nút sáng hơn. Độ
+  tương phản đo được kể cả khi video phía sau trắng: chữ 15:1, nút 5,9:1 (WCAG AA ≥ 4,5:1).
 
 | Loại | Chữ hiển thị |
 | --- | --- |
@@ -144,6 +155,30 @@ Tốc độ mặc định (0,25× đến 3×) được áp dụng cho mỗi vide
 pha capture trên `document`), áp lại sau 800 ms vì player có thể đặt lại. Người dùng vẫn đổi tốc độ
 trong menu của YouTube như bình thường cho video đang xem.
 
+### 3.3b Bố cục màn ngang và "Mở ứng dụng" (`25_layout`)
+
+* **Tự phủ kín màn hình khi xem ở màn ngang.** Khi video trên trang xem bắt đầu phát
+  (`playing`) và màn hình đang ngang, `<html>` được gắn lớp `ttm-fill`: thanh đầu YouTube bị ẩn,
+  `#player-container-id` ghim kín viewport, `<video>` phủ kín với `object-fit: cover`, nên không còn
+  viền đen hai bên trên màn 20:9 (mép trên/dưới video bị cắt một chút). Tắt "Phủ kín màn hình (cắt
+  bớt mép video)" để dùng `contain` (có viền đen, không cắt). Tắt "Tự động toàn màn hình khi xem"
+  để tắt hẳn. Back lần 1 thoát chế độ này (giữ trang xem), Back lần 2 mới `history.back()`.
+  Mở bài khác thì tự bật lại.
+* **Vì sao không dùng Fullscreen API.** Đã thử trên m.youtube.com thật: mọi kiểu toàn màn hình
+  "thật" (`requestFullscreen` trên container hoặc `<html>`) và cả `body[faux-fullscreen]` của
+  YouTube đều khiến YouTube kéo `#player-control-container` phủ lên video, và **chạm đúp ±10 s gốc
+  ngừng hoạt động**. Lớp phủ CSS giữ nguyên bố cục đó nên chạm đúp vẫn chạy. Thanh trạng thái/điều
+  hướng Android đã do app ẩn (immersive), nên hình ảnh như nhau. Hằng `USE_FULLSCREEN_API` (mặc định
+  `false`) giữ lại đường API để thử sau.
+* Chỉ ghim container ngoài cùng. `#player` / `#movie_player` vẫn theo luồng bình thường; nếu đặt
+  `#player` là `absolute`, khối điều khiển (nơi YouTube bắt chạm đúp) bị kéo lên trên và hỏng chạm đúp.
+* **Ẩn "Mở ứng dụng".** Trong thanh đầu m.youtube.com (khi chưa đăng nhập) nút này là
+  `<a>` trong `ytm-button-renderer.icon-avatar_logged_out` (`ytm-mobile-topbar-renderer#header-bar`).
+  Module tìm theo **chữ** ("Mở ứng dụng", "Open App", …) hoặc link `intent:`/`vnd.youtube:`/Play Store
+  trong thanh đầu và các khối quảng bá app (`ytm-mealbar-promo-renderer`, …), rồi gắn lớp
+  `ttm-app-promo` (`display:none`). Không ẩn cả thanh đầu, nên Tìm kiếm và ảnh đại diện (khi đã
+  đăng nhập) vẫn còn. Luôn bật vì trong app nút này vô dụng.
+
 ### 3.4 Cài đặt (`30_settings`): không có nút nổi
 
 Mục **"Cài đặt TizenTube"** (biểu tượng bánh răng, cao 48px) được chèn **vào menu tài khoản** của
@@ -153,6 +188,12 @@ m.youtube.com (bấm ảnh đại diện). Bấm vào sẽ mở bảng cài đ�
 * SponsorBlock (tự bỏ qua đoạn) và **từng loại đoạn**
 * Tốc độ phát mặc định
 * Vuốt dọc chỉnh độ sáng / âm lượng
+
+Bảng cài đặt cao tối đa **85vh** (≈350 px trên màn ngang 412 px). Phần đầu (tiêu đề + nút **✕**
+48×48 ở góc trên phải, `aria-label="Đóng"`) cố định, chỉ phần thân cuộn (`overflow-y: auto`), nên mục
+"Mở đầu" và các mục dưới luôn tới được. Nhận dạng cử chỉ bỏ qua các lớp phủ của TizenTube
+(`#ttm-sheet-backdrop`, `#ttm-skip-toast`, `#ttm-level`), nên vuốt trong bảng là cuộn, không chỉnh âm
+lượng (trước đây trong trình phát toàn màn hình vuốt bị nhận nhầm và chặn cuộn).
 
 Lưu trong `localStorage` khoá `tizentube_mobile_settings_v1` (theo origin m.youtube.com). Nút Back
 Android đóng bảng trước khi điều hướng.
@@ -439,12 +480,22 @@ nguội trên runner miễn phí **gần như chắc chắn hết đĩa hoặc h
 | `cobalt/browser/switches.h` | Switch `--tizentube-mobile-ui`. |
 | `cobalt/browser/cobalt_content_browser_client.cc`, `cobalt/browser/BUILD.gn` | UA + client hints mobile. |
 | `cobalt/shell/BUILD.gn` | Khai báo `inputs` cho các file JS nhúng. |
-| `cobalt/shell/embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_*.js` | Userscript mobile (5 module). |
+| `cobalt/shell/embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_*.js` | Userscript mobile (6 module). |
 | `third_party/blink/renderer/core/dom/document.cc` | Bỏ userscript jsdelivr (TV) trên `m.youtube.com`. |
-| `tools/touch_harness/*` | Harness + kiểm thử tự động. |
+| `tools/touch_harness/*` | Harness + kiểm thử tự động (`e2e_cdp.mjs`, `host_guard_test.mjs`). |
 | `.github/workflows/android_touch_mobile.yaml` | Workflow build APK arm64 chạy tay. |
 
 ## 12. Kết quả kiểm tra (không build toàn bộ)
+
+### Lượt designer v4 (thử lại trên m.youtube.com thật)
+
+31/31 đạt (Pixel 7 ngang, UA của app, nạp nguyên văn 6 module). Mới: tự phủ kín màn ngang (player và
+`<video>` 915×412 ở (0,0), thanh đầu ẩn, `cover`), chạm vẫn giữ bố cục, "Mở ứng dụng" bị ẩn ở trang
+xem (thanh đầu trang chủ không có nút này ngay cả khi không có userscript; đã đối chứng), tương phản
+toast, bảng cài đặt ≤ 85vh + cuộn bằng chạm tới "Mở đầu" + ✕ đóng bảng, chặn host trên
+`accounts.google.com` thật (chỉ tải trang, không đăng nhập: không `TTM`, không phần tử/style,
+`JSON.parse` và `Response.json` vẫn native). Tất cả mục cũ vẫn đạt, trong đó chạm đúp ±10 s gốc được
+đo **khi đang phủ kín màn hình**. Harness cục bộ 52/52, `host_guard_test.mjs` 23/23.
 
 ### Thử trên m.youtube.com thật (Chrome headless)
 
@@ -469,8 +520,8 @@ Giới hạn: không đăng nhập Google, nên menu ảnh đại diện (đư�
 trên trang thật, chỉ trong harness. Phiên headless chưa đăng nhập không được phát quảng cáo trong
 video, nên đường "bấm Bỏ qua / nhảy qua quảng cáo đang chạy" chỉ được kiểm trong harness.
 
-* `node --check`: đạt cho cả 5 module userscript, `html_media_element_extension_on_java_bridge.js`
-  và mọi file JS của harness (`harness_pre.js`, `load_modules.js`, `harness.js`, `e2e_cdp.mjs`).
+* `node --check`: đạt cho cả 6 module userscript, `html_media_element_extension_on_java_bridge.js`
+  và mọi file JS của harness (`harness_pre.js`, `load_modules.js`, `harness.js`, `e2e_cdp.mjs`, `host_guard_test.mjs`).
 * Manifest: là template jinja2 nên không `xmllint` trực tiếp được. Đã render bằng jinja2 có sẵn trong
   `third_party/jinja2` với `tizentube_mobile_ui=true` và `false`. Cả hai bản XML đều hợp lệ theo trình
   phân tích XML của Python (`xml.dom.minidom`). Máy này không có `xmllint`.
