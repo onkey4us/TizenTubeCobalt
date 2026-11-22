@@ -32,20 +32,30 @@
 
   // ---------------------------------------------------------------- toast
   TTM.addStyle([
-    '#ttm-skip-toast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);',
-    // Contrast (designer v4): ~85% opaque black, pure white text, bold bright button.
-    // Worst case (white video behind): background ≈ #262626, text 15:1, button 9:1.
-    'z-index:2147483646;display:flex;align-items:center;gap:12px;max-width:90vw;',
-    'padding:6px 6px 6px 18px;border-radius:24px;background:rgba(0,0,0,.85);color:#fff;',
+    // Contrast (designer v4/v5): 85% opaque black panel, pure white text, bold button.
+    // Worst case (white video behind): panel ≈ #262626, text 15:1, button 5.9:1.
+    // v5: the panel used to FADE IN (opacity 0→1 over 200 ms). For the first frames the
+    // whole toast — panel, text and button — was semi-transparent over the video, which
+    // reads as "faint text on a coloured background" (e.g. the teal Despacito frame).
+    // Now it appears at full opacity immediately and only fades OUT. !important keeps
+    // page CSS from overriding the panel/text colours.
+    'html body #ttm-skip-toast{position:fixed!important;left:50%!important;bottom:72px!important;',
+    'transform:translateX(-50%)!important;z-index:2147483646!important;display:flex!important;',
+    'align-items:center;gap:12px;max-width:90vw;box-sizing:border-box;',
+    'padding:6px 6px 6px 18px;border-radius:24px;',
+    'background:rgba(0,0,0,.85)!important;background-image:none!important;color:#fff!important;',
     'border:1px solid rgba(255,255,255,.22);',
-    'font:500 15px/1.3 Roboto,Arial,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.6);',
-    'text-shadow:0 1px 2px rgba(0,0,0,.6);',
-    'opacity:0;pointer-events:none;transition:opacity .2s}',
-    '#ttm-skip-toast.ttm-show{opacity:1;pointer-events:auto}',
-    '#ttm-skip-toast button{min-width:48px;min-height:40px;padding:0 16px;border:0;border-radius:20px;',
-    'background:rgba(138,196,255,.22);color:#a8d4ff;font:700 15px Roboto,Arial,sans-serif;',
-    'letter-spacing:.2px;cursor:pointer}',
-    '#ttm-skip-toast button:active{background:rgba(138,196,255,.4)}'
+    'font:500 15px/1.3 Roboto,Arial,sans-serif!important;box-shadow:0 2px 12px rgba(0,0,0,.6);',
+    'text-shadow:0 1px 2px rgba(0,0,0,.6);filter:none!important;backdrop-filter:none!important;',
+    'mix-blend-mode:normal!important;',
+    'opacity:0;visibility:hidden;pointer-events:none;transition:opacity .2s,visibility 0s .2s}',
+    'html body #ttm-skip-toast.ttm-show{opacity:1!important;visibility:visible!important;',
+    'pointer-events:auto;transition:none!important}',
+    'html body #ttm-skip-toast .ttm-text{color:#fff!important;opacity:1!important}',
+    'html body #ttm-skip-toast button{min-width:48px;min-height:40px;padding:0 16px;border:0;border-radius:20px;',
+    'background:rgba(138,196,255,.22)!important;color:#a8d4ff!important;',
+    'font:700 15px Roboto,Arial,sans-serif!important;letter-spacing:.2px;cursor:pointer;opacity:1!important}',
+    'html body #ttm-skip-toast button:active{background:rgba(138,196,255,.4)!important}'
   ].join(''));
 
   var toastEl = null, toastTimer = 0, toastUndo = null;

@@ -64,10 +64,7 @@
     '#ttm-sheet input[type=checkbox]{width:22px;height:22px;accent-color:#3ea6ff;flex:none}',
     '#ttm-sheet select{min-height:40px;min-width:140px;border-radius:8px;background:#333;color:#fff;',
     'border:1px solid #555;font-size:14px;padding:0 8px}',
-    '#ttm-sheet .ttm-actions{flex:none;display:flex;justify-content:flex-end;padding:8px;',
-    'border-top:1px solid rgba(255,255,255,.1)}',
-    '#ttm-sheet .ttm-actions button{min-height:48px;min-width:96px;border:0;border-radius:24px;',
-    'background:#3ea6ff;color:#0f0f0f;font:500 14px Roboto,Arial,sans-serif;cursor:pointer}'
+    '#ttm-sheet .ttm-body{padding-bottom:8px}'
   ].join(''));
 
   var GEAR_PATH = 'M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.9' +
@@ -224,14 +221,8 @@
     sheet.appendChild(checkbox(S.fillCrop, st.fillCrop, function (v) { TTM.setSetting('fillCrop', v); }));
     sheet = sheetRoot;
 
-    var actions = document.createElement('div');
-    actions.className = 'ttm-actions';
-    var close = document.createElement('button');
-    close.type = 'button';
-    close.textContent = S.close;
-    close.addEventListener('click', closeSheet);
-    actions.appendChild(close);
-    sheet.appendChild(actions);
+    // No bottom "Đóng" button (designer v5): ✕ in the header, Android Back and a tap
+    // on the backdrop close the sheet, and the rows get the vertical space.
 
     backdrop.appendChild(sheet);
     backdrop.addEventListener('click', function (e) { if (e.target === backdrop) closeSheet(); });

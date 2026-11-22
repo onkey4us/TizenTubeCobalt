@@ -133,6 +133,9 @@ Rủi ro: YouTube đổi tên khoá/thẻ thường xuyên. Khi quảng cáo l�
 * Khi bỏ qua, hiện thông báo ở **dưới** màn hình trong **4 giây** kèm nút **"Hoàn tác"**. Nền đen
   đục 85%, chữ trắng 15px; "Hoàn tác" đậm (700), màu xanh sáng `#a8d4ff` trên nền nút sáng hơn. Độ
   tương phản đo được kể cả khi video phía sau trắng: chữ 15:1, nút 5,9:1 (WCAG AA ≥ 4,5:1).
+  Thông báo hiện **ngay** ở độ mờ 100% (không hiệu ứng hiện dần), chỉ mờ dần khi biến mất. Trước đây
+  nó hiện dần 0→1 trong 200 ms, nên trong những khung hình đầu cả nền lẫn chữ đều trong suốt trên
+  video (nhìn như chữ xám nhạt trên nền màu). Màu nền/chữ dùng `!important`.
 
 | Loại | Chữ hiển thị |
 | --- | --- |
@@ -191,7 +194,8 @@ m.youtube.com (bấm ảnh đại diện). Bấm vào sẽ mở bảng cài đ�
 
 Bảng cài đặt cao tối đa **85vh** (≈350 px trên màn ngang 412 px). Phần đầu (tiêu đề + nút **✕**
 48×48 ở góc trên phải, `aria-label="Đóng"`) cố định, chỉ phần thân cuộn (`overflow-y: auto`), nên mục
-"Mở đầu" và các mục dưới luôn tới được. Nhận dạng cử chỉ bỏ qua các lớp phủ của TizenTube
+"Mở đầu" và các mục dưới luôn tới được. **Không có nút "Đóng" ở dưới**: đóng bằng ✕, nút Back
+Android, hoặc chạm ra ngoài bảng. Ở 915×412 thấy trọn 5 dòng cài đặt (thân bảng 297 px). Nhận dạng cử chỉ bỏ qua các lớp phủ của TizenTube
 (`#ttm-sheet-backdrop`, `#ttm-skip-toast`, `#ttm-level`), nên vuốt trong bảng là cuộn, không chỉnh âm
 lượng (trước đây trong trình phát toàn màn hình vuốt bị nhận nhầm và chặn cuộn).
 
@@ -343,7 +347,7 @@ Một `FrameLayout` thường trả `null`, nên bàn phím có thể hiện nh�
 | Menu tài khoản | "Cài đặt TizenTube" | Mở bảng cài đặt | TizenTube |
 | Ô tìm kiếm | Chạm | Bàn phím Android | Chromium IME |
 
-Mục tiêu chạm ≥ 48dp: các nút của TizenTube (mục menu, công tắc, nút "Hoàn tác", "Đóng") có
+Mục tiêu chạm ≥ 48dp: các nút của TizenTube (mục menu, công tắc, nút "Hoàn tác", ✕) có
 `min-height` 48px hoặc 40px trong vùng 48px. Trang dùng mật độ thật nên 1 CSS px = 1 dp.
 
 ## 9. Harness thử nghiệm

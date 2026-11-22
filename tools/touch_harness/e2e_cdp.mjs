@@ -220,6 +220,11 @@ try {
     fill.r[2] === fill.vw && fill.r[3] === fill.vh && fill.v[2] === fill.vw && fill.v[3] === fill.vh && fill.fit === 'cover', JSON.stringify(fill));
   // Toast contrast: compute WCAG ratio over a white backdrop (worst case).
   await ev(`TTM.player.showSkipToast({ category: 'sponsor' }, function () {})`);
+  // v5: no fade-in, the toast is fully opaque in the same frame it is shown.
+  const toastNow = await ev(`(() => { const t = document.getElementById('ttm-skip-toast'); const cs = getComputedStyle(t);
+    return { opacity: cs.opacity, anims: t.getAnimations().length, bg: cs.backgroundColor, color: cs.color }; })()`);
+  check('toast opaque immediately (no fade-in), bg rgba(0,0,0,.85), text #fff', toastNow.opacity === '1' && toastNow.anims === 0 &&
+    toastNow.bg === 'rgba(0, 0, 0, 0.85)' && toastNow.color === 'rgb(255, 255, 255)', JSON.stringify(toastNow));
   const contrast = await ev(`(() => {
     const parse = c => c.match(/[\\d.]+/g).map(Number);
     const lum = ([r, g, b]) => { const f = x => (x /= 255) <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
@@ -251,6 +256,8 @@ try {
   await sleep(400);
   const scrolled = await ev(`document.querySelector('#ttm-sheet .ttm-body').scrollTop`);
   check('touch scroll in sheet scrolls body, no volume change', scrolled > 20 && (await ev(`TizenTubeMobile.getVolume()`)) === vBefore, 'scrollTop=' + scrolled);
+  check('no bottom "Đóng" button / actions bar in the sheet (v5)', await ev(`(() => { const s = document.getElementById('ttm-sheet');
+    return !s.querySelector('.ttm-actions') && [...s.querySelectorAll('button')].every(b => b.classList.contains('ttm-x')); })()`));
   await ev(`document.querySelector('#ttm-sheet .ttm-x').click()`);
   check('✕ closes the sheet', await ev(`!document.getElementById('ttm-sheet')`));
   await ev(`TTM.settingsUi.open()`);
