@@ -15,7 +15,13 @@
 # runner or a large GitHub runner (set the `runner` input), see the docs.
 name: android_touch_mobile
 
+# workflow_dispatch only works once this file is on the default branch. Until then
+# (e.g. on the touch-mobile branch of a fork) push a tag instead:
+#   git tag build-apk-<anything> touch-mobile && git push fork build-apk-<anything>
+# Tag runs use the defaults below (qa, mobile UI, ubuntu-latest, 360 min).
 on:
+  push:
+    tags: ['build-apk-*']
   workflow_dispatch:
     inputs:
       config:
@@ -44,18 +50,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.config }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.config || 'qa' }}
   cancel-in-progress: true
 
 jobs:
   build-android-arm64:
-    name: android-arm64_${{ inputs.config }}
-    runs-on: ${{ fromJSON(inputs.runner) }}
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+    name: android-arm64_${{ inputs.config || 'qa' }}
+    runs-on: ${{ fromJSON(inputs.runner || '"ubuntu-latest"') }}
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || 360) }}
     env:
       PLATFORM: android-arm64
-      CONFIG: ${{ inputs.config }}
-      MOBILE_UI: ${{ inputs.mobile_ui }}
+      CONFIG: ${{ inputs.config || 'qa' }}
+      # Tag pushes have no inputs: default to the phone build.
+      MOBILE_UI: ${{ github.event_name == 'push' || inputs.mobile_ui }}
       DEPOT_TOOLS_UPDATE: 0
       DEPOT_TOOLS_REPORT_BUILD: 0
       DEPOT_TOOLS_COLLECT_METRICS: 0

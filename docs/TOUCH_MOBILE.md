@@ -390,7 +390,15 @@ Các DEPS nội bộ (`checkout_cobalt_internal`, `checkout_src_internal`) mặc
 
 ### Workflow GitHub Actions đề xuất: `.github/workflows/android_touch_mobile.yaml`
 
-Chỉ chạy tay (`workflow_dispatch`), các input:
+Kích hoạt bằng tay (`workflow_dispatch`) **hoặc** đẩy tag `build-apk-*`. GitHub chỉ cho
+`workflow_dispatch` khi file workflow đã nằm trên nhánh mặc định; khi nó mới ở nhánh `touch-mobile`
+thì dùng tag (chạy với giá trị mặc định: `qa`, bản mobile, `ubuntu-latest`, 360 phút):
+
+```bash
+git tag build-apk-1 touch-mobile && git push fork build-apk-1
+```
+
+Các input của `workflow_dispatch`:
 
 * `config`: `devel` / `qa` (mặc định) / `gold`;
 * `mobile_ui`: giá trị `tizentube_mobile_ui` (bỏ chọn = bản TV);
