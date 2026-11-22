@@ -162,6 +162,10 @@ dựa vào class sinh tự động):
 
 * Chính: `ytm-multi-page-menu-renderer`, `ytm-account-section-list-renderer`, `ytm-account-menu`.
   Mục được chèn trước `ytm-compact-link-renderer` đầu tiên (hoặc nối vào cuối).
+* **Khi chưa đăng nhập** (không có ảnh đại diện / menu tài khoản): phần tài khoản là tab **"Bạn"**
+  (`/feed/library`), trang này chỉ có `ytm-sign-in-promo-with-background-renderer`. Mục được chèn
+  ngay trên khối mời đăng nhập, là một dòng trong trang (cuộn theo trang, không nổi). Đã kiểm trên
+  m.youtube.com thật.
 * Dự phòng, chỉ khi không có menu tài khoản (ví dụ trong trình phát toàn màn hình): bảng menu
   tràn của trình phát `ytm-bottom-sheet-renderer`, `ytm-menu-popup-renderer`, `.player-settings-menu`.
 * `MutationObserver` trên `<body>` (gộp theo `requestAnimationFrame`) chèn lại khi YouTube vẽ lại menu.
@@ -433,6 +437,29 @@ nguội trên runner miễn phí **gần như chắc chắn hết đĩa hoặc h
 | `.github/workflows/android_touch_mobile.yaml` | Workflow build APK arm64 chạy tay. |
 
 ## 12. Kết quả kiểm tra (không build toàn bộ)
+
+### Thử trên m.youtube.com thật (Chrome headless)
+
+Bộ thử nằm ngoài repo (`/workspace/TizenTubeCobalt-test/`, Playwright + Chrome hệ thống), mô phỏng
+Pixel 7 ngang 915×412 @2,625x, có cảm ứng, đúng UA của app, nạp **nguyên văn** 5 module ở document
+start, cầu nối Android được giả lập. Video `kJQP7kiw5Fk` (có đoạn `music_offtopic` 0–21,8 s trên
+SponsorBlock; các video LTT/MKBHD thử qua API không có đoạn `sponsor`). Kết quả 20/20 đạt: tải đoạn
+SponsorBlock, tự bỏ qua, thông báo tiếng Việt ở dưới + "Hoàn tác" (tua về và không bỏ qua lại), tốc
+độ mặc định, xoá trường quảng cáo trong `ytInitialPlayerResponse`, không có giao diện quảng cáo, vuốt
+âm lượng/độ sáng + ô chỉ báo giữa màn, chạm đúp ±10 s gốc của YouTube vẫn chạy, vuốt dọc không tua/không
+dừng, mục cài đặt (tab "Bạn" khi chưa đăng nhập) + bảng cài đặt + lưu `localStorage` + Back.
+
+Lỗi tìm thấy và đã sửa nhờ thử trên trang thật:
+
+* `TTM.addStyle` gọi `appendChild` lúc document start khi `<html>` chưa tồn tại → `TypeError`, cả
+  userscript không khởi tạo. Harness không bắt được vì nó nạp module sau khi `<head>` đã có. Nay
+  chờ phần tử gốc bằng `MutationObserver`.
+* Khi chưa đăng nhập, m.youtube.com không có menu tài khoản → không có chỗ đặt mục cài đặt. Nay
+  chèn vào tab "Bạn".
+
+Giới hạn: không đăng nhập Google, nên menu ảnh đại diện (đường chính khi đã đăng nhập) chưa được thử
+trên trang thật, chỉ trong harness. Phiên headless chưa đăng nhập không được phát quảng cáo trong
+video, nên đường "bấm Bỏ qua / nhảy qua quảng cáo đang chạy" chỉ được kiểm trong harness.
 
 * `node --check`: đạt cho cả 5 module userscript, `html_media_element_extension_on_java_bridge.js`
   và mọi file JS của harness (`harness_pre.js`, `load_modules.js`, `harness.js`, `e2e_cdp.mjs`).

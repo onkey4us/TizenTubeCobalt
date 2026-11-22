@@ -12,6 +12,10 @@
  *    Containers: ytm-multi-page-menu-renderer, ytm-account-section-list-renderer,
  *    ytm-account-menu (older). We add our row before the first
  *    ytm-compact-link-renderer of the container (or append it).
+ *  - Signed out there is no avatar/account menu. The account section is then
+ *    the "Bạn" (You) tab, /feed/library, which shows
+ *    ytm-sign-in-promo-with-background-renderer; we add the row as a list
+ *    item above that promo (inline, scrolls with the page, not floating).
  *  - Fallback: the player settings / overflow bottom sheet
  *    (ytm-bottom-sheet-renderer, ytm-menu-popup-renderer, .player-settings-menu).
  *  A MutationObserver on <body> re-injects whenever YouTube re-renders a menu.
@@ -26,6 +30,8 @@
     'ytm-account-menu'];
   var FALLBACK_MENU_SELECTORS = ['ytm-bottom-sheet-renderer', 'ytm-menu-popup-renderer',
     '.player-settings-menu'];
+  // Signed-out "Bạn" tab (/feed/library): insert before the sign-in promo.
+  var SIGNED_OUT_ANCHORS = ['ytm-sign-in-promo-with-background-renderer', 'ytm-sign-in-promo-renderer'];
   var ROW_ATTR = 'data-ttm-entry';
 
   TTM.addStyle([
@@ -91,6 +97,15 @@
     });
     // Fallback only where the account menu is not available (e.g. inside the
     // fullscreen player, where the avatar is not reachable).
+    SIGNED_OUT_ANCHORS.forEach(function (sel) {
+      document.querySelectorAll(sel).forEach(function (promo) {
+        var parent = promo.parentNode;
+        if (!parent || parent.querySelector(':scope > [' + ROW_ATTR + ']')) return;
+        parent.insertBefore(makeEntry(), promo);
+        TTM.log('settings: entry added before <' + promo.tagName.toLowerCase() + '> (signed out)');
+        found = true;
+      });
+    });
     var accountPresent = ACCOUNT_MENU_SELECTORS.some(function (sel) { return document.querySelector(sel); });
     if (!accountPresent) {
       FALLBACK_MENU_SELECTORS.forEach(function (sel) {

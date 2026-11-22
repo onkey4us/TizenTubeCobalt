@@ -137,10 +137,25 @@
       document.documentElement;
   }
 
+  /**
+   * Adds a <style>. Document-start scripts (AddDocumentStartJavaScript) run
+   * before <html> exists, so attach as soon as there is a root element.
+   */
   function addStyle(css) {
     var el = document.createElement('style');
     el.textContent = css;
-    (document.head || document.documentElement).appendChild(el);
+    var root = document.head || document.documentElement;
+    if (root) {
+      root.appendChild(el);
+    } else {
+      var mo = new MutationObserver(function () {
+        var r = document.head || document.documentElement;
+        if (!r) return;
+        mo.disconnect();
+        if (!el.isConnected) r.appendChild(el);
+      });
+      mo.observe(document, { childList: true, subtree: true });
+    }
     return el;
   }
 
