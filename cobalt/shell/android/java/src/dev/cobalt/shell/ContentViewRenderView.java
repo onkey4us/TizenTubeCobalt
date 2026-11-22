@@ -9,14 +9,19 @@ import static dev.cobalt.shell.Shell.TAG;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
 import android.view.Window;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 import org.chromium.base.Log;
 import org.chromium.content_public.browser.BrowserStartupController;
+import org.chromium.content_public.browser.ImeAdapter;
+import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.WindowAndroid;
@@ -345,6 +350,52 @@ public class ContentViewRenderView extends FrameLayout {
       Log.i(TAG, "ContentViewRenderView: Applying pending format");
       mWindowSurfaceHolder.setFormat(mPendingSurfaceFormat);
       mPendingSurfaceFormat = null;
+    }
+  }
+
+  private boolean mImeContainerEnabled;
+
+  /**
+   * Makes this view act as the IME container for the current WebContents (like Chromium's
+   * ContentView): focusable, and forwarding onCreateInputConnection() to ImeAdapter. Off by
+   * default so Android TV builds keep their existing behaviour.
+   */
+  public void setImeContainerEnabled(boolean enabled) {
+    mImeContainerEnabled = enabled;
+    setFocusable(enabled);
+    setFocusableInTouchMode(enabled);
+    if (enabled) {
+      requestFocus();
+    }
+  }
+
+  private boolean hasValidWebContents() {
+    return mWebContents != null && !mWebContents.isDestroyed();
+  }
+
+  @Override
+  public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+    if (!mImeContainerEnabled || !hasValidWebContents()) {
+      return super.onCreateInputConnection(outAttrs);
+    }
+    return ImeAdapter.fromWebContents(mWebContents).onCreateInputConnection(outAttrs);
+  }
+
+  @Override
+  public boolean onCheckIsTextEditor() {
+    if (!mImeContainerEnabled || !hasValidWebContents()) {
+      return super.onCheckIsTextEditor();
+    }
+    return ImeAdapter.fromWebContents(mWebContents).onCheckIsTextEditor();
+  }
+
+  @Override
+  protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+    super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+    if (mImeContainerEnabled && hasValidWebContents()) {
+      ViewEventSink sink = ViewEventSink.from(mWebContents);
+      sink.setHideKeyboardOnBlur(true);
+      sink.onViewFocusChanged(gainFocus);
     }
   }
 

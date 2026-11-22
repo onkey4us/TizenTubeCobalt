@@ -539,6 +539,17 @@ action("embed_polyfilled_javascript") {
   outputs = [ "$target_gen_dir/embedded_resources/embedded_js.h" ]
   public_configs = [ ":embed_polyfilled_javascript_config" ]
 
+  # Listed so edits re-trigger the action. Every file in the directory is
+  # embedded and injected at document start by Shell::RegisterInjectedJavaScript.
+  inputs = [
+    "embedded_resources/cobalt_java_script_polyfill/html_media_element_extension_on_java_bridge.js",
+    "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_00_core.js",
+    "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_10_adblock.js",
+    "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_20_player.js",
+    "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_30_settings.js",
+    "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_40_gestures.js",
+  ]
+
   args = [
     "CobaltJavaScriptPolyfill",
     rebase_path(outputs[0], root_build_dir),

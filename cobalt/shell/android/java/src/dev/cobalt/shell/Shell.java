@@ -68,6 +68,17 @@ public class Shell {
   private @Nullable Callback<Boolean> mOverlayModeChangedCallbackForTesting;
   private ViewGroup mRootView;
 
+  // When true, ContentViewRenderView (instead of android.R.id.content) is used as the
+  // ViewAndroidDelegate container view. ImeAdapterImpl calls
+  // containerView.onCreateInputConnection() through its proxy view, and only
+  // ContentViewRenderView forwards that to ImeAdapter. Required for the Android soft
+  // keyboard to type into web <input> elements (TizenTube mobile / m.youtube.com).
+  private static boolean sUseRenderViewAsImeContainer;
+
+  public static void setUseRenderViewAsImeContainer(boolean enabled) {
+    sUseRenderViewAsImeContainer = enabled;
+  }
+
   /** Constructor for inflating via XML. */
   public Shell(Context context) {
     Activity activity = (Activity) context;
@@ -178,8 +189,11 @@ public class Shell {
   @CalledByNative
   @Initializer
   private void initFromNativeTabContents(WebContents webContents) {
-    if (webContents == null || mContentViewRenderView == null) return;
-    mViewAndroidDelegate = new ShellViewAndroidDelegate(mRootView);
+    ContentViewRenderView renderView = mContentViewRenderView;
+    if (webContents == null || renderView == null) return;
+    renderView.setImeContainerEnabled(sUseRenderViewAsImeContainer);
+    mViewAndroidDelegate =
+        new ShellViewAndroidDelegate(sUseRenderViewAsImeContainer ? renderView : mRootView);
     assert (mWebContents != webContents);
     if (mWebContents != null) mWebContents.clearNativeReference();
     webContents.setDelegates(

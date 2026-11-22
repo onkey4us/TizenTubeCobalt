@@ -4011,7 +4011,12 @@ void Document::ImplicitClose() {
   load_event_progress_ = kLoadEventInProgress;
 
   // TizenTube userscript injection.
-  if (IsA<HTMLDocument>(this)) {
+  // The jsdelivr userscript targets youtube.com/tv (leanback). m.youtube.com
+  // gets the bundled TizenTube mobile userscript instead
+  // (cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
+  // tizentube_mobile_*.js, injected at document start by
+  // Shell::RegisterInjectedJavaScript), so skip the remote one there.
+  if (IsA<HTMLDocument>(this) && Url().Host() != "m.youtube.com") {
     Element* script_container = head();
 
     if (!script_container) {

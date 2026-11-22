@@ -30,6 +30,8 @@ import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
 import android.view.ViewParent;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.Toast;
@@ -43,6 +45,7 @@ import dev.cobalt.browser.CobaltContentBrowserClient;
 import dev.cobalt.coat.javabridge.CobaltJavaScriptAndroidObject;
 import dev.cobalt.coat.javabridge.CobaltJavaScriptInterface;
 import dev.cobalt.coat.javabridge.HTMLMediaElementExtension;
+import dev.cobalt.coat.javabridge.TizenTubeMobileBridge;
 import dev.cobalt.dial.DIALServer;
 import dev.cobalt.dial.DiscoveryServer;
 import dev.cobalt.media.AudioOutputManager;
@@ -73,6 +76,8 @@ import org.chromium.content.browser.input.ImeAdapterImpl;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.DeviceUtils;
 import org.chromium.content_public.browser.JavascriptInjector;
+import org.chromium.content_public.browser.NavigationController;
+import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.base.ActivityWindowAndroid;
@@ -84,6 +89,17 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   private static final String META_DATA_ENABLE_FEATURES = "cobalt.ENABLE_FEATURES";
   private static final String YOUTUBE_URL = "https://www.youtube.com/tv";
   private static final String COBALT_USING_ANDROID_OVERLAY = "cobalt-using-android-overlay";
+
+  // TizenTube phone mode (m.youtube.com). Driven by the manifest meta-data below, which is emitted
+  // when the GN arg `tizentube_mobile_ui` is true (see //cobalt/android/tizentube_mobile.gni and
+  // docs/TOUCH_MOBILE.md).
+  private static final String META_DATA_TIZENTUBE_MOBILE_UI = "tizentube.MOBILE_UI";
+  private static final String TIZENTUBE_MOBILE_UI_SWITCH = "--tizentube-mobile-ui";
+  private static final String USE_MOBILE_USER_AGENT_SWITCH = "use-mobile-user-agent";
+  private static final String FORCE_DEVICE_SCALE_FACTOR_SWITCH = "--force-device-scale-factor=";
+  // Origins allowed to call window.TizenTubeMobile (net::SchemeHostPortMatcher rules).
+  private static final List<String> TIZENTUBE_MOBILE_BRIDGE_ORIGINS =
+      Arrays.asList("https://m.youtube.com", "https://www.youtube.com", "https://youtube.com");
 
   // How many seconds before the app exits if it fails to land YouTube home page.
   private static final int DEFAULT_HANG_APP_CRASH_TIMEOUT_SECONDS = 120;
@@ -112,6 +128,10 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   private final Handler mHandler = new Handler(Looper.getMainLooper());
 
   private boolean mIsCobaltUsingAndroidOverlay;
+
+  private boolean mIsMobileUi;
+  private static final long MOBILE_BACK_DEBOUNCE_MS = 300;
+  private long mLastMobileBackMs;
 
   private NetworkChangeNotifier.ConnectionTypeObserver mNetworkRecoveryObserver;
   private boolean mIsNetworkRecoveryObserverRegistered = false;
@@ -193,9 +213,27 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       args.add("--remote-allow-origins=https://chrome-devtools-frontend.appspot.com");
     }
     appendMetaDataArgs(args, getActivityMetaData());
-    args.addAll(JavaSwitches.getExtraCommandLineArgs(getJavaSwitches()));
+    List<String> extraArgs = new ArrayList<>(JavaSwitches.getExtraCommandLineArgs(getJavaSwitches()));
+    if (isTizenTubeMobileUi()) {
+      // The leanback UI is laid out for a fixed 1920x1080 viewport with scale factor 1.
+      // m.youtube.com needs the real device density, otherwise it renders tiny on phones.
+      extraArgs.removeIf(arg -> arg.startsWith(FORCE_DEVICE_SCALE_FACTOR_SWITCH));
+      args.add(TIZENTUBE_MOBILE_UI_SWITCH);
+      // Release (gold) builds cancel any navigation without a Content-Security-Policy header
+      // (CobaltSecureNavigationThrottle). That is fine for youtube.com/tv, but m.youtube.com
+      // navigates to Google sign-in/consent pages that do not all send one. An explicit
+      // --csp-enforcement from the intent still wins because it is appended later.
+      args.add("--csp-enforcement=false");
+    }
+    args.addAll(extraArgs);
     appendIntentArgs(args);
     return args;
+  }
+
+  /** True when the APK was built with tizentube_mobile_ui=true (manifest meta-data). */
+  protected boolean isTizenTubeMobileUi() {
+    Bundle metaData = getActivityMetaData();
+    return metaData != null && metaData.getBoolean(META_DATA_TIZENTUBE_MOBILE_UI, false);
   }
 
   // Initially copied from ContentShellActiviy.java
@@ -211,6 +249,15 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
         CommandLine.getInstance().hasSwitch(COBALT_USING_ANDROID_OVERLAY);
 
     DeviceUtils.updateDeviceSpecificUserAgentSwitch(this);
+    mIsMobileUi = isTizenTubeMobileUi();
+    if (mIsMobileUi) {
+      // updateDeviceSpecificUserAgentSwitch() drops this on tablet-sized screens; m.youtube.com
+      // needs the "Mobile" UA token on every device. Read by //components/embedder_support.
+      CommandLine.getInstance().appendSwitch(USE_MOBILE_USER_AGENT_SWITCH);
+      // Use ContentViewRenderView as IME container so the soft keyboard can type into <input>.
+      Shell.setUseRenderViewAsImeContainer(true);
+      enterImmersiveMode();
+    }
 
     StartupGuard.getInstance().setStartupMilestone(StartupGuard.PRE_LIBRARY_LOADER_INIT);
     // This initializes JNI and ends up calling JNI_OnLoad in native code
@@ -394,6 +441,10 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   public boolean onKeyDown(int keyCode, KeyEvent event) {
     if (keyCode == KeyEvent.KEYCODE_BACK) {
       mPhysicalBackKeyPressed = true;
+      if (mIsMobileUi) {
+        // Handled on key up (handleMobileBack), like a browser.
+        return true;
+      }
     }
     // If input is a from a gamepad button, it shouldn't be dispatched to IME which incorrectly
     // consumes the event as a VKEY_UNKNOWN
@@ -410,8 +461,123 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
     }
     if (keyCode == KeyEvent.KEYCODE_BACK) {
       mPhysicalBackKeyPressed = false;
+      if (mIsMobileUi) {
+        if (!event.isCanceled()) {
+          handleMobileBack();
+        }
+        return true;
+      }
     }
     return dispatchKeyEventToIme(keyCode, KeyEvent.ACTION_UP) || super.onKeyUp(keyCode, event);
+  }
+
+  /**
+   * Back in TizenTube phone mode (m.youtube.com): leave tab fullscreen first, then go back in web
+   * history (history.back(), so the SPA router runs), and only when there is no previous web page
+   * send the app to the background, the same as Cobalt's requestSuspend().
+   */
+  void handleMobileBack() {
+    // Key events and OnBackInvokedCallback can both report one press on Android 13+.
+    long now = SystemClock.uptimeMillis();
+    if (now - mLastMobileBackMs < MOBILE_BACK_DEBOUNCE_MS) {
+      return;
+    }
+    mLastMobileBackMs = now;
+    WebContents webContents = getActiveWebContents();
+    if (webContents == null || webContents.isDestroyed()) {
+      moveTaskToBack(true);
+      return;
+    }
+    if (webContents.isFullscreenForCurrentTab()) {
+      webContents.exitFullscreen();
+      return;
+    }
+    final boolean canGoBack = canGoBackInWebHistory(webContents);
+    // Give the bundled userscript a chance to consume Back (e.g. close the TizenTube settings
+    // sheet), then use history.back() so the m.youtube.com SPA router handles the navigation.
+    String js =
+        "(function(){try{var h=window.__tizentubeMobileHandleBack;"
+            + "if(typeof h==='function'&&h()===true)return 1;}catch(e){}"
+            + (canGoBack ? "history.back();return 2;" : "return 0;")
+            + "})()";
+    webContents.evaluateJavaScript(
+        js,
+        result -> {
+          if ("1".equals(result) || "2".equals(result)) {
+            return;
+          }
+          if ("0".equals(result)) {
+            Log.i(TAG, "Back at web history root, moving task to back.");
+            moveTaskToBack(true);
+            return;
+          }
+          // The script did not run (page not ready, crashed renderer, ...).
+          if (canGoBack && !webContents.isDestroyed()) {
+            webContents.getNavigationController().goBack();
+          } else {
+            moveTaskToBack(true);
+          }
+        });
+  }
+
+  /**
+   * NavigationController#canGoBack() also counts the blank entry that ShellManager.launchShell()
+   * commits before loading the startup URL, so ignore an empty/about:blank previous entry.
+   */
+  private static boolean canGoBackInWebHistory(WebContents webContents) {
+    NavigationController controller = webContents.getNavigationController();
+    if (controller == null || !controller.canGoBack()) {
+      return false;
+    }
+    int index = controller.getLastCommittedEntryIndex();
+    NavigationEntry previous = index > 0 ? controller.getEntryAtIndex(index - 1) : null;
+    if (previous == null || previous.getUrl() == null) {
+      return false;
+    }
+    String spec = previous.getUrl().getSpec();
+    return !TextUtils.isEmpty(spec) && !spec.startsWith("about:");
+  }
+
+  /** Hides status and navigation bars (sticky immersive; swipe from an edge shows them briefly). */
+  @SuppressWarnings("deprecation")
+  private void enterImmersiveMode() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      WindowManager.LayoutParams lp = getWindow().getAttributes();
+      lp.layoutInDisplayCutoutMode =
+          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+      getWindow().setAttributes(lp);
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      // Keep decorFitsSystemWindows=true so windowSoftInputMode=adjustResize still shrinks the
+      // web view when the soft keyboard opens. Hidden bars report zero insets anyway.
+      // getDecorView() makes sure the decor exists before asking for its insets controller.
+      getWindow().getDecorView();
+      WindowInsetsController controller = getWindow().getInsetsController();
+      if (controller != null) {
+        controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+        controller.setSystemBarsBehavior(
+            WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+      }
+    } else {
+      getWindow()
+          .getDecorView()
+          .setSystemUiVisibility(
+              View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                  | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                  | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                  | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                  | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                  | View.SYSTEM_UI_FLAG_FULLSCREEN);
+    }
+  }
+
+  @Override
+  public void onWindowFocusChanged(boolean hasFocus) {
+    super.onWindowFocusChanged(hasFocus);
+    // Dialogs and the IME can bring the bars back; re-apply when focus returns.
+    if (hasFocus && mIsMobileUi) {
+      enterImmersiveMode();
+    }
   }
 
   // Initially copied from ContentShellActiviy.java
@@ -540,6 +706,10 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
     // 1. Gather all Java objects that need to be exposed to JavaScript.
     // TODO(b/379701165): consider to refine the way to add JavaScript interfaces.
     mJavaScriptAndroidObjectList.add(new HTMLMediaElementExtension(this));
+    if (mIsMobileUi) {
+      // Brightness / volume bridge for the bundled m.youtube.com userscript.
+      mJavaScriptAndroidObjectList.add(new TizenTubeMobileBridge(this));
+    }
 
     // 2. Use JavascriptInjector to inject Java objects into the WebContents.
     //    This makes the annotated methods in these objects accessible from JavaScript.
@@ -550,11 +720,19 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       Log.d(
           TAG,
           "Add JavaScriptAndroidObject:" + javascriptAndroidObject.getJavaScriptInterfaceName());
-      javascriptInjector.addPossiblyUnsafeInterface(
-          javascriptAndroidObject,
-          javascriptAndroidObject.getJavaScriptInterfaceName(),
-          CobaltJavaScriptInterface.class,
-          /* originAllowlist= */ new ArrayList<String>());
+      List<String> originAllowlist =
+          javascriptAndroidObject instanceof TizenTubeMobileBridge
+              ? TIZENTUBE_MOBILE_BRIDGE_ORIGINS
+              : new ArrayList<String>();
+      List<String> badOrigins =
+          javascriptInjector.addPossiblyUnsafeInterface(
+              javascriptAndroidObject,
+              javascriptAndroidObject.getJavaScriptInterfaceName(),
+              CobaltJavaScriptInterface.class,
+              originAllowlist);
+      if (badOrigins != null && !badOrigins.isEmpty()) {
+        Log.e(TAG, "Rejected JavaScript bridge origins: " + badOrigins);
+      }
     }
   }
 
@@ -1064,6 +1242,12 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
             public void onBackInvoked() {
               if (activity.mPhysicalBackKeyPressed) {
                 return; // Bypassed: physical key events are already driving this navigation
+              }
+
+              if (activity.mIsMobileUi) {
+                // Gesture back on m.youtube.com: web history, not the TV Escape key.
+                activity.handleMobileBack();
+                return;
               }
 
               // 1. Dispatch keydown to initiate navigation immediately.

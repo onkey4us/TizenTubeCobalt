@@ -1,4 +1,6 @@
 {% set enable_ad_id_permission = enable_ad_id_permission | default(True) %}
+{# tizentube_mobile_ui comes from //cobalt/android/tizentube_mobile.gni as "true"/"false". #}
+{% set tizentube_mobile = (tizentube_mobile_ui | default("false")) == "true" %}
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Copyright 2016 The Cobalt Authors. All Rights Reserved.
@@ -69,10 +71,20 @@
                   android:theme="@style/CobaltTheme"
                   android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
                   android:windowSoftInputMode="adjustResize"
+                  {% if tizentube_mobile %}
+                  android:screenOrientation="sensorLandscape"
+                  {% endif %}
                   android:supportsPictureInPicture="true"
                   android:exported="true">
+            {% if tizentube_mobile %}
+            {# Phone build: phone-style YouTube UI. See docs/TOUCH_MOBILE.md. #}
+            <meta-data android:name="cobalt.APP_URL" android:value="https://m.youtube.com/"/>
+            <meta-data android:name="tizentube.MOBILE_UI" android:value="true"/>
+            {% else %}
             <meta-data android:name="cobalt.APP_URL" android:value="https://www.youtube.com/tv?additionalDataUrl=http://localhost:8012/apps/YouTube"/>
-            <meta-data android:name="cobalt.ENABLE_SPLASH_SCREEN" android:value="true"/>
+            {% endif %}
+            {# The native splash is the youtube.com/tv splash page; not used in phone mode. #}
+            <meta-data android:name="cobalt.ENABLE_SPLASH_SCREEN" android:value="{{ 'false' if tizentube_mobile else 'true' }}"/>
             <meta-data android:name="com.google.android.tv.pip.category" android:value="communication" />
             <meta-data android:name="cobalt.EVERGREEN_LITE" android:value="false"/>
             {# ENABLE_FEATURES accepts a semi-colon-separated list of Chromium features. #}

@@ -60,6 +60,7 @@
 #include "cobalt/shell/common/shell_switches.h"
 #include "cobalt/shell/common/url_constants.h"
 #include "cobalt/version.h"
+#include "components/embedder_support/switches.h"
 #include "components/embedder_support/user_agent_utils.h"
 #include "components/metrics/metrics_state_manager.h"
 #include "components/metrics_services_manager/metrics_services_manager.h"
@@ -206,9 +207,34 @@ static void JNI_CobaltContentBrowserClient_DispatchFocus(JNIEnv*) {
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
+static bool IsTizenTubeMobileUI() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kTizenTubeMobileUI);
+}
+
+// Chrome-for-Android mobile UA, e.g.
+// "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko)
+//  Chrome/138.0.0.0 Mobile Safari/537.36"
+// Built by //components/embedder_support so the Chrome version always matches
+// the bundled Chromium (keeps UA string and client hints consistent). The
+// " Mobile" token comes from --use-mobile-user-agent, which CobaltActivity
+// appends together with --tizentube-mobile-ui before native startup.
+static std::string GetTizenTubeMobileUserAgent() {
+  LOG_IF(WARNING, !base::CommandLine::ForCurrentProcess()->HasSwitch(
+                      embedder_support::kUseMobileUserAgent))
+      << "--" << switches::kTizenTubeMobileUI << " without --"
+      << embedder_support::kUseMobileUserAgent
+      << ": UA will lack the \"Mobile\" token.";
+  static const std::string mobile_ua = embedder_support::GetUserAgent();
+  return mobile_ua;
+}
+
 std::string GetCobaltUserAgent() {
   if (!CobaltContentBrowserClient::GetUserAgentOverride().empty()) {
     return CobaltContentBrowserClient::GetUserAgentOverride();
+  }
+  if (IsTizenTubeMobileUI()) {
+    return GetTizenTubeMobileUserAgent();
   }
   const UserAgentPlatformInfo platform_info;
   static const std::string user_agent_str = platform_info.ToString();
@@ -216,6 +242,13 @@ std::string GetCobaltUserAgent() {
 }
 
 blink::UserAgentMetadata GetCobaltUserAgentMetadata() {
+  if (IsTizenTubeMobileUI()) {
+    // Standard Chrome metadata (brands, "Android", mobile=?1) so that
+    // Sec-CH-UA-* headers agree with the mobile UA string.
+    blink::UserAgentMetadata metadata = embedder_support::GetUserAgentMetadata();
+    metadata.mobile = true;
+    return metadata;
+  }
   blink::UserAgentMetadata metadata;
   const UserAgentPlatformInfo platform_info;
   metadata.brand_version_list.emplace_back(platform_info.brand().value_or(""),

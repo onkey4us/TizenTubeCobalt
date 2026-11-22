@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Same Trusted Types enforcement as m.youtube.com (response header
+     "require-trusted-types-for 'script'"): any innerHTML/eval-style sink in the
+     userscript throws here too. Only the harness loader policy is allowed. -->
+<meta http-equiv="Content-Security-Policy"
+      content="require-trusted-types-for 'script'; trusted-types ttm-harness-loader">
+<title>TizenTube mobile — bộ thử userscript</title>
+<link rel="stylesheet" href="harness.css">
+<!-- Same order as in the APK: harness setup, then the REAL modules from the repo,
+     injected "at document start" (before <body> exists). Serve from the repo root:
+       python3 -m http.server 8000   →  http://localhost:8000/tools/touch_harness/
+     or from this folder (falls back to ./modules/, see README in docs/TOUCH_MOBILE.md). -->
+<script src="harness_pre.js"></script>
+<script src="load_modules.js"></script>
+</head>
+<body>
+<div id="app">
+  <!-- Mock m.youtube.com header -->
+  <header class="mock-header">
+    <span class="logo">▶ YouTube</span>
+    <span class="spacer"></span>
+    <button id="search-btn" class="icon-btn" aria-label="Tìm kiếm">⌕</button>
+    <button id="avatar-btn" class="avatar" aria-label="Tài khoản">A</button>
+  </header>
+  <div id="search-bar" hidden>
+    <input id="search-input" type="search" placeholder="Tìm kiếm trên YouTube" autocomplete="off">
+  </div>
+
+  <main class="layout">
+    <section class="watch">
+      <!-- Mock HTML5 player (same tag/class names as m.youtube.com) -->
+      <div id="player-container-id">
+        <div id="movie_player" class="html5-video-player">
+          <video class="html5-main-video" playsinline></video>
+          <canvas id="frame" width="640" height="360"></canvas>
+          <div class="ad-badge">Quảng cáo · <span id="ad-left"></span></div>
+          <div class="ytp-ad-overlay-container">Lớp phủ quảng cáo (phải bị ẩn)</div>
+          <div class="mock-controls">
+            <button id="play-btn" data-ttm-no-gesture>⏯</button>
+            <span id="time">0:00 / 0:00</span>
+            <span class="spacer"></span>
+            <span id="rate"></span>
+            <button id="overflow-btn" data-ttm-no-gesture aria-label="Thêm">⋮</button>
+            <button id="fs-btn" data-ttm-no-gesture aria-label="Toàn màn hình">⛶</button>
+          </div>
+          <div class="ytp-progress-bar"><div id="progress-fill"></div><div id="sb-marks"></div></div>
+        </div>
+      </div>
+      <p class="hint">Bật mô phỏng cảm ứng trong DevTools (Ctrl+Shift+M). Vuốt dọc nửa trái = độ sáng,
+        nửa phải = âm lượng. Chạm / chạm đúp vẫn thuộc về trình phát (log "native tap").</p>
+    </section>
+
+    <aside class="panel">
+      <h3>Điều khiển thử</h3>
+      <label><input type="checkbox" id="opt-bridge" checked> Cầu nối Android giả (window.TizenTubeMobile)</label>
+      <label><input type="checkbox" id="opt-real-sb"> Gọi API SponsorBlock thật</label>
+      <div class="btn-row">
+        <button id="btn-ad">Phát quảng cáo giả</button>
+        <button id="btn-json">Thử lọc JSON quảng cáo</button>
+        <button id="btn-next">Video kế tiếp</button>
+        <button id="btn-back">Nút Back Android</button>
+        <button id="btn-seek">Tua tới 4s (trước đoạn tài trợ)</button>
+        <button id="btn-reset">Xoá cài đặt (localStorage)</button>
+      </div>
+      <div id="levels">Âm lượng: <b id="lv-vol">–</b> · Độ sáng: <b id="lv-bri">–</b></div>
+      <h3>Nhật ký</h3>
+      <div id="log" aria-live="polite"></div>
+    </aside>
+  </main>
+
+  <!-- Mock feed with ad items that must be hidden -->
+  <section class="feed">
+    <ytm-rich-item-renderer class="tile">Video 1</ytm-rich-item-renderer>
+    <ytm-promoted-sparkles-web-renderer class="tile ad">QUẢNG CÁO (phải bị ẩn)</ytm-promoted-sparkles-web-renderer>
+    <ytm-rich-item-renderer class="tile">Video 2</ytm-rich-item-renderer>
+    <ytm-rich-item-renderer class="tile"><ad-slot-renderer>QUẢNG CÁO trong lưới (phải bị ẩn)</ad-slot-renderer></ytm-rich-item-renderer>
+    <ytm-rich-item-renderer class="tile">Video 3</ytm-rich-item-renderer>
+    <ytm-companion-ad-renderer class="tile ad">Quảng cáo đồng hành (phải bị ẩn)</ytm-companion-ad-renderer>
+  </section>
+</div>
+<div id="dim"></div>
+<script src="harness.js"></script>
+</body>
+</html>

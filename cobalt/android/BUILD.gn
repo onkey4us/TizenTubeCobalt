@@ -1,6 +1,7 @@
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 import("//cobalt/android/manifest.gni")
+import("//cobalt/android/tizentube_mobile.gni")
 import("//cobalt/build/configs/cobalt.gni")
 import("//third_party/icu/config.gni")
 import("//third_party/jni_zero/jni_zero.gni")
@@ -22,6 +23,7 @@ jinja_template("cobalt_manifest") {
   variables = [
     "manifest_package=io.gh.reisxd.tizentube.cobalt",
     "build_type=$build_type",
+    "tizentube_mobile_ui=$tizentube_mobile_ui",
   ]
 }
 
@@ -170,6 +172,7 @@ android_library("cobalt_main_java") {
     "apk/app/src/main/java/dev/cobalt/coat/javabridge/CobaltJavaScriptAndroidObject.java",
     "apk/app/src/main/java/dev/cobalt/coat/javabridge/CobaltJavaScriptInterface.java",
     "apk/app/src/main/java/dev/cobalt/coat/javabridge/HTMLMediaElementExtension.java",
+    "apk/app/src/main/java/dev/cobalt/coat/javabridge/TizenTubeMobileBridge.java",
     "apk/app/src/main/java/dev/cobalt/features/StarboardFeatureList.java",
     "apk/app/src/main/java/dev/cobalt/libraries/services/clientloginfo/ClientLogInfo.java",
     "apk/app/src/main/java/dev/cobalt/libraries/services/clientloginfo/ClientLogInfoModule.java",

@@ -39,6 +39,12 @@ constexpr char kWindowSize[] = "window-size";
 // --enable-h5vcc-settings=Key1=Val1;Key2=Val2
 constexpr char kEnableH5vccSettings[] = "enable-h5vcc-settings";
 
+// TizenTube phone mode: report a Chrome-for-Android mobile user agent (and
+// mobile UA client hints) so YouTube serves m.youtube.com. Appended by
+// dev.cobalt.coat.CobaltActivity when the manifest meta-data
+// "tizentube.MOBILE_UI" is true. See docs/TOUCH_MOBILE.md.
+constexpr char kTizenTubeMobileUI[] = "tizentube-mobile-ui";
+
 }  // namespace switches
 }  // namespace cobalt
 

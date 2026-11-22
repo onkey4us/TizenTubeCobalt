@@ -1,0 +1,55 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #0f0f0f; color: #f1f1f1; font: 14px/1.4 Roboto, Arial, sans-serif; }
+button { min-height: 40px; border-radius: 8px; border: 1px solid #444; background: #272727; color: #fff;
+  font: inherit; padding: 0 12px; cursor: pointer; }
+.mock-header { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 12px; background: #212121; }
+.mock-header .logo { font-weight: 700; color: #f33; }
+.spacer { flex: 1; }
+.icon-btn, .avatar { width: 48px; height: 48px; border-radius: 50%; padding: 0; font-size: 18px; }
+.avatar { background: #3ea6ff; color: #000; font-weight: 700; border: 0; }
+#search-bar { padding: 8px 12px; background: #212121; }
+#search-input { width: 100%; height: 40px; border-radius: 20px; border: 1px solid #555; background: #121212;
+  color: #fff; padding: 0 16px; font-size: 16px; }
+.layout { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
+.watch { flex: 1 1 60%; min-width: 0; }
+#movie_player { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden;
+  user-select: none; touch-action: pan-y; }
+#movie_player video { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+#frame { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mock-controls { position: absolute; left: 0; right: 0; bottom: 6px; display: flex; align-items: center;
+  gap: 8px; padding: 0 8px; background: linear-gradient(transparent, rgba(0,0,0,.7)); transition: opacity .2s; }
+#movie_player.controls-hidden .mock-controls { opacity: 0; pointer-events: none; }
+.mock-controls button { min-width: 48px; min-height: 48px; background: transparent; border: 0; font-size: 20px; }
+.ytp-progress-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: rgba(255,255,255,.3); }
+#progress-fill { height: 100%; width: 0; background: #f00; }
+#sb-marks { position: absolute; inset: 0; pointer-events: none; }
+#sb-marks i { position: absolute; top: 0; bottom: 0; background: #0d0; opacity: .8; }
+.ad-badge { display: none; position: absolute; left: 8px; top: 8px; background: #fc0; color: #000;
+  padding: 2px 8px; border-radius: 4px; font-weight: 700; }
+#movie_player.ad-showing .ad-badge { display: block; }
+.ytp-ad-overlay-container { position: absolute; left: 20%; right: 20%; bottom: 60px; background: #fc0; color: #000;
+  text-align: center; padding: 6px; }
+.ytp-ad-skip-button-modern { position: absolute; right: 8px; bottom: 60px; min-height: 48px; background: #fff;
+  color: #000; border: 0; }
+.panel { flex: 0 0 340px; background: #181818; border-radius: 12px; padding: 8px 12px; }
+.panel h3 { margin: 8px 0; font-size: 14px; color: #aaa; }
+.panel label { display: flex; gap: 8px; align-items: center; min-height: 36px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+#levels { margin: 6px 0; }
+#log { height: 280px; overflow: auto; background: #000; border-radius: 8px; padding: 6px; font: 12px/1.35 monospace; }
+#log div { white-space: pre-wrap; border-bottom: 1px solid #1a1a1a; }
+#log .tt { color: #9cf; } #log .net { color: #fc6; } #log .bridge { color: #9f9; } #log .page { color: #ccc; }
+#log .err { color: #f77; }
+.feed { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 12px 24px; }
+.tile { display: flex; align-items: center; justify-content: center; width: 200px; height: 112px;
+  background: #333; border-radius: 8px; }
+.tile.ad, ad-slot-renderer { background: #a60; }
+.hint { color: #aaa; font-size: 12px; }
+#dim { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 2147483640; }
+/* Mock account menu, shaped like m.youtube.com */
+ytm-multi-page-menu-renderer { position: fixed; top: 52px; right: 8px; width: 300px; background: #282828;
+  border-radius: 12px; padding: 8px 0; z-index: 1000; box-shadow: 0 4px 16px rgba(0,0,0,.6); }
+ytm-compact-link-renderer { display: flex; align-items: center; min-height: 48px; padding: 0 16px; }
+ytm-bottom-sheet-renderer { position: fixed; left: 0; right: 0; bottom: 0; background: #282828; padding: 8px 0;
+  z-index: 1000; border-radius: 12px 12px 0 0; }
+ytm-menu-service-item-renderer { display: flex; align-items: center; min-height: 48px; padding: 0 16px; }

@@ -1,0 +1,145 @@
+# Builds the TizenTube *phone* APK (m.youtube.com + bundled mobile userscript)
+# for android-arm64 and uploads it as an artifact. See docs/TOUCH_MOBILE.md.
+#
+# Upstream CI (main.yaml / android_27.lts.yaml) cannot be reused as-is from a
+# fork: its build job runs on [self-hosted, chrobalt-linux-runner] inside a
+# docker image pushed to ghcr by a self-hosted job, and authenticates to GoB and
+# RBE (projects/cobalt-actions-prod) with Google credentials. This workflow uses
+# the same recipe as cobalt/devinfra/kokoro/bin/dind_build.sh (gclient sync ->
+# cobalt/build/gn.py -> autoninja cobalt/android:cobalt_apk), with RBE disabled.
+#
+# Runner sizing: a Chromium-based Android checkout + build needs roughly
+# 100+ GB of disk and many CPU-hours. GitHub-hosted `ubuntu-latest` runners
+# have ~14 GB free disk (about 70-90 GB after cleanup) and a 6 h job limit, so
+# a cold build there is expected to FAIL (disk or timeout). Use a self-hosted
+# runner or a large GitHub runner (set the `runner` input), see the docs.
+name: android_touch_mobile
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: 'Build config (gn.py -C).'
+        required: true
+        type: choice
+        options: [devel, qa, gold]
+        default: qa
+      mobile_ui:
+        description: 'tizentube_mobile_ui GN arg (false = original youtube.com/tv build).'
+        required: true
+        type: boolean
+        default: true
+      runner:
+        description: 'runs-on label(s) as JSON, e.g. ["self-hosted","linux","x64"] or "ubuntu-latest".'
+        required: true
+        type: string
+        default: '"ubuntu-latest"'
+      timeout_minutes:
+        description: 'Job timeout in minutes (hosted runners max out at 360).'
+        required: true
+        type: number
+        default: 360
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.config }}
+  cancel-in-progress: true
+
+jobs:
+  build-android-arm64:
+    name: android-arm64_${{ inputs.config }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+    env:
+      PLATFORM: android-arm64
+      CONFIG: ${{ inputs.config }}
+      MOBILE_UI: ${{ inputs.mobile_ui }}
+      DEPOT_TOOLS_UPDATE: 0
+      DEPOT_TOOLS_REPORT_BUILD: 0
+      DEPOT_TOOLS_COLLECT_METRICS: 0
+      DEPOT_TOOLS_METRICS: 0
+      # Same depot_tools pin as .github/actions/depot_tools and dind_build.sh.
+      DEPOT_TOOLS_REV: 4a978d8f1f3567d5bd729aec018bfc345a14e1cd
+    steps:
+      - name: Free disk space (GitHub-hosted runners only)
+        if: runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -x
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/boost /usr/local/.ghcup /usr/share/swift || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install host packages
+        if: runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          # Subset of cobalt/docker/linux/Dockerfile needed for an Android build.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl git python3-dev python3-pip \
+            xz-utils zstd pkgconf gperf libglib2.0-0 libnss3 lsb-release file
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: cobalt/src
+          # gn.py derives the build id from history; a full clone is what upstream uses
+          # for non-PR builds.
+          fetch-depth: 0
+
+      - name: Set up depot_tools
+        shell: bash
+        run: |
+          set -ex
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git cobalt/depot_tools
+          git -C cobalt/depot_tools checkout "${DEPOT_TOOLS_REV}"
+          echo "${GITHUB_WORKSPACE}/cobalt/depot_tools" >> "${GITHUB_PATH}"
+          source cobalt/depot_tools/bootstrap_python3 && bootstrap_python3
+
+      - name: gclient config + sync
+        shell: bash
+        working-directory: cobalt
+        run: |
+          set -ex
+          build_telemetry opt-out || true
+          gclient config --name=src "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          echo "target_os=['android']" >> .gclient
+          gclient validate
+          gclient sync --verbose --shallow --no-history --nohooks --force \
+            --delete_unversioned_trees --revision "${GITHUB_SHA}"
+          gclient runhooks --verbose
+          df -h .
+
+      - name: GN gen
+        shell: bash
+        working-directory: cobalt/src
+        run: |
+          set -ex
+          cobalt/build/gn.py -p "${PLATFORM}" -C "${CONFIG}" --no-rbe \
+            --script-executable=/usr/bin/python3
+          echo "tizentube_mobile_ui = ${MOBILE_UI}" >> "out/${PLATFORM}_${CONFIG}/args.gn"
+          gn gen "out/${PLATFORM}_${CONFIG}"
+          gn args --list --short --overrides-only "out/${PLATFORM}_${CONFIG}"
+
+      - name: Build cobalt_apk
+        shell: bash
+        working-directory: cobalt/src
+        run: |
+          set -ex
+          autoninja -C "out/${PLATFORM}_${CONFIG}" cobalt/android:cobalt_apk
+          ls -la "out/${PLATFORM}_${CONFIG}/apks/" || true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: tizentube-mobile-${{ env.PLATFORM }}-${{ env.CONFIG }}-${{ github.sha }}
+          # Same globs as the "Archive Android APKs" step in .github/actions/build.
+          path: |
+            cobalt/src/out/${{ env.PLATFORM }}_${{ env.CONFIG }}/apks/*.apk
+            cobalt/src/out/${{ env.PLATFORM }}_${{ env.CONFIG }}/*_apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
