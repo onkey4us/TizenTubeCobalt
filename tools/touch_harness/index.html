@@ -56,6 +56,14 @@
       </div>
       <p class="hint">Bật mô phỏng cảm ứng trong DevTools (Ctrl+Shift+M). Vuốt dọc nửa trái = độ sáng,
         nửa phải = âm lượng. Chạm / chạm đúp vẫn thuộc về trình phát (log "native tap").</p>
+      <!-- Mock comments teaser (m.youtube.com markup). -->
+      <div class="watch-below-the-player" id="mock-below">
+      <comments-entry-point-teaser-view-model id="mock-comments"><yt-comment-teaser-carousel-item-view-model>Bình luận mẫu</yt-comment-teaser-carousel-item-view-model></comments-entry-point-teaser-view-model>
+      <!-- Real m.youtube.com (v7d): the "Bình luận" card is a generic metadata carousel. -->
+      <yt-video-metadata-carousel-view-model id="mock-comment-carousel"><h2>Bình luận</h2><span>4,4 Tr</span>
+        <yt-carousel-item-view-model><yt-comment-teaser-carousel-item-view-model></yt-comment-teaser-carousel-item-view-model></yt-carousel-item-view-model></yt-video-metadata-carousel-view-model>
+      <yt-video-metadata-carousel-view-model id="mock-other-carousel"><h2>Khác</h2></yt-video-metadata-carousel-view-model>
+      </div>
       <!-- Mock watch-next list (m.youtube.com markup), 12 items + continuation. -->
       <ytm-single-column-watch-next-results-renderer id="mock-related">
         <ytm-item-section-renderer><lazy-list id="mock-related-list"></lazy-list>

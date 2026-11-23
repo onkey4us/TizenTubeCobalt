@@ -50,7 +50,8 @@
     [480, 720, 1080].forEach(function (s) { if (s <= cap && need > s * 0.85 && s > target) target = s; });
     return { target: target, max: cap, playerPx: playerPhysicalHeight() };
   }
-  // Highest available quality <= h (YouTube's available levels for this video).
+  // Highest available quality <= h (YouTube's available levels for this video). With fps
+  // capped at 30 (module 07), 60 fps-only levels are not offered by the player at all.
   function bestAtMost(p, h) {
     var levels = [];
     try { levels = p.getAvailableQualityLevels() || []; } catch (e) {}
@@ -60,6 +61,7 @@
 
   var lastKey = '';
   function apply(reason, force) {
+    if (TTM.settings.audioOnly) { lastKey = ''; return false; }  // module 24 owns quality then
     var p = player();
     if (!p || typeof p.setPlaybackQualityRange !== 'function' || !TTM.player.currentVideoId()) return false;
     var w = wanted();

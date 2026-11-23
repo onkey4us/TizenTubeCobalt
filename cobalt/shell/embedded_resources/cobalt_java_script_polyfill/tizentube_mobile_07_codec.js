@@ -11,7 +11,12 @@
  * video.width/height/framerate). On the car head unit we steer it away from formats
  * that are expensive or software-decoded:
  *   - AV1 (av01) is always rejected;
- *   - anything above 1920x1080 or above 60 fps is rejected;
+ *   - anything above 1920x1080 is rejected;
+ *   - v7c: anything above 30 fps is rejected by default (the X7 panel runs at 50 Hz,
+ *     60 fps doubles decode work for frames the panel drops anyway); setting
+ *     "Cho phép 60fps" raises the limit to 60. YouTube probes formats with
+ *     'framerate=' in the type string, so 1080p60/720p60 formats disappear and it picks
+ *     a <=30 fps format (on 60 fps-only uploads that means <=480p, which has 30 fps);
  *   - setting "Codec" = 'h264' additionally rejects VP9/VP8 video (vp09, vp9, vp8,
  *     and video/webm in general), so YouTube serves H.264 (avc1);
  *   - 'auto' also rejects VP9 when the device has no HARDWARE VP9 decoder
@@ -27,7 +32,8 @@
   var TTM = window.TTM;
   if (!TTM || TTM.codec) return;
 
-  var MAX_W = 1920, MAX_H = 1080, MAX_FPS = 60;
+  var MAX_W = 1920, MAX_H = 1080;
+  function maxFps() { return TTM.settings.fps60 ? 60 : 30; }
   var hwVp9 = null;  // lazily asked once
   function hasHwVp9() {
     if (hwVp9 !== null) return hwVp9;
@@ -57,7 +63,7 @@
     if (h == null) h = param(t, 'height');
     if (fps == null) fps = param(t, 'framerate');
     if ((w && w > MAX_W) || (h && h > MAX_H)) return 'size>' + MAX_W + 'x' + MAX_H;
-    if (fps && fps > MAX_FPS) return 'fps>' + MAX_FPS;
+    if (fps && fps > maxFps()) return 'fps>' + maxFps();
     var isVpx = /vp0?9|vp8|vp09/.test(t) || /^\s*video\/webm/.test(t);
     if (TTM.settings.codec === 'h264' && isVpx) return 'h264-only';
     if (isVpx && !hasHwVp9()) return 'no-hw-vp9';

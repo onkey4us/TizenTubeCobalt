@@ -245,7 +245,10 @@
     sheet.appendChild(radioGroup('onLeave', S.onLeave, S.onLeaveOptions, st.onLeave));
     var qualityGroup = radioGroup('quality', S.quality, S.qualityOptions, st.quality);
     qualityGroup.appendChild(TTM.el('p', { 'class': 'ttm-note' }, [S.qualityNote]));
+    qualityGroup.appendChild(checkbox(S.fps60, st.fps60, function (v) { TTM.setSetting('fps60', v); }, 'ttm-sub'));
+    qualityGroup.appendChild(TTM.el('p', { 'class': 'ttm-note' }, [S.fps60Note]));
     sheet.appendChild(qualityGroup);
+    sheet.appendChild(checkbox(S.audioOnly, st.audioOnly, function (v) { TTM.setSetting('audioOnly', v); }));
     var codecGroup = radioGroup('codec', S.codec, S.codecOptions, st.codec);
     codecGroup.appendChild(TTM.el('p', { 'class': 'ttm-note' }, [S.codecNote]));
     sheet.appendChild(codecGroup);

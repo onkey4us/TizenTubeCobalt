@@ -84,6 +84,7 @@ cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
   tizentube_mobile_07_codec.js     chặn AV1, >1080p, >60 fps; VP9 chỉ khi có giải mã cứng (v7)
   tizentube_mobile_08_light.js     tắt xem trước trong feed, tắt hiệu ứng/bóng/glow, ảnh lazy, danh sách liên quan ≤ 8 (v7/v7b)
   tizentube_mobile_22_quality.js   "Chất lượng": giới hạn độ phân giải qua API player (v7b)
+  tizentube_mobile_24_audioonly.js "Chỉ nghe" (144p, ẩn hình, ảnh bìa) + không tự tải bình luận (v7c)
   tizentube_mobile_40_background.js báo Java video có đang phát (v6; thay module vuốt dọc cũ)
 ```
 
@@ -675,7 +676,71 @@ xem: hiện **8** mục đầu, ẩn phần còn lại và mục tải tiếp (`
 **"Xem thêm"** (≥ 48 px) để hiện hết; sau đó tải tiếp của YouTube chạy như thường khi cuộn tới. Mỗi
 video mới quay lại giới hạn 8.
 
+## 4e. v7c: 30fps, Chỉ nghe, bình luận, cờ bộ nhớ
+
+**30 fps mặc định** (module 07): `isTypeSupported` / `decodingInfo` từ chối `framerate > 30` (trước là
+60). Màn X7 chạy 50 Hz nên khung 60 fps phần lớn bị bỏ mà vẫn tốn giải mã. YouTube dò định dạng với
+`framerate=` trong chuỗi type, nên các mức `1080p60`/`720p60` biến khỏi danh sách chất lượng của player
+và nó chọn định dạng ≤ 30 fps (video chỉ tải lên 60 fps thì còn ≤ 480p, mức 30 fps). Cài đặt **"Cho phép
+60fps"** (tắt mặc định, nằm trong nhóm "Chất lượng") nâng giới hạn lên 60 — chọn công tắc riêng thay vì
+gắn với "1080p" để không trộn độ phân giải với tần số khung. Có hiệu lực từ video tiếp theo (YouTube chỉ
+dò lúc đầu).
+
+**"Chỉ nghe"** (cài đặt + nút nhanh): ghim chất lượng thấp nhất (`tiny` 144p, hoặc mức thấp nhất có) qua
+`setPlaybackQualityRange` (module 22 nhường khi bật), ẩn điểm ảnh video bằng `opacity:0` (không dừng,
+không `display:none` → tiếng, điều khiển YouTube, SponsorBlock vẫn chạy), hiện ảnh bìa
+`i.ytimg.com/vi/<id>/maxresdefault.jpg` (dự phòng `hqdefault.jpg`) + tiêu đề trong khung trình phát. Giữ
+qua các video (áp lại theo id video). Tắt: hình trở lại, chất lượng theo "Chất lượng". **Nút nhanh**:
+hàng 48 px "Chỉ nghe"/"Hiện hình" **ngay dưới** khung trình phát ở bố cục thường (ô chia màn) — không
+nằm trên trình phát nên không chồng lớp phủ native (đặt khớp khung trình phát) hay thanh tua. Ở chế độ
+phủ kín màn rộng không có chỗ dưới trình phát: dùng bảng cài đặt. Chọn cách này (JS) thay vì nút native
+vì ít rủi ro hơn (không cần thêm vị trí vào lớp phủ đã chật ở ô 427×480).
+
+**Không tự tải bình luận**: ở trang xem, khối mời bình luận (`comments-entry-point-teaser-view-model`,
+`yt-comment-teaser-carousel-item-view-model`, `ytm-comment-section-renderer`, …) bị `display:none` và
+**làm rỗng** khi YouTube chèn vào, nên bộ tải lười (IntersectionObserver / continuation) không có gì để
+theo dõi và không gửi yêu cầu. Nút "Hiện bình luận" (cạnh "Chỉ nghe") hiện lại cho video hiện tại; khi
+đó YouTube có thể cần cuộn để tải.
+
+**Cờ bộ nhớ** (`CobaltActivity.addMemoryFlags`, chỉ chế độ mobile, đã kiểm tên trong mã nguồn):
+
+| Cờ | Có trong cây? | Áp dụng | Lý do |
+| --- | --- | --- | --- |
+| `--renderer-process-limit=1` | có (`content_switches.cc`, đọc ở `BrowserMainLoop`) | **thêm** | Cobalt đã `--single-process`; cờ này giữ 1 renderer kể cả khi bỏ single-process. |
+| `--disable-site-isolation-trials` | có (`kDisableSiteIsolation`) | **thêm** | Không tách tiến trình theo site cho iframe của m.youtube.com (quảng cáo, đăng nhập). |
+| `--site-per-process` | có | không thêm | Mặc định Android không bật; không cần tắt. |
+| `--disk-cache-size`, `--media-cache-size` | `disk-cache-size` chỉ ở `chrome/`, `media-cache-size` không có | **không thêm** | Cobalt không đọc; HTTP cache = `kSbMaxSystemPathCacheDirectorySize` 24 MiB (≤ 32 MB), ghi đè bằng `--max-http-cache-size`; cache media là của Starboard. |
+| `--js-flags=--max-old-space-size=256` | V8 | **đổi** 512 → 256 MB (initial 64 → 32) | Sửa trong `--js-flags` mà `JavaSwitches` sinh ra (không thêm `--js-flags` thứ hai; giá trị thí nghiệm đặt riêng giữ nguyên). |
+| `--disable-background-networking` | chỉ ở `chrome/` | **không thêm** | Không có nơi đọc trong content/cobalt. |
+| `--disable-features=NavigationPredictor` | có (blink, bật mặc định) | **thêm** | Thu số liệu thẻ `<a>` cho preload, content shell không dùng. Ghép với `--disable-features` có sẵn qua `CommandLineOverrideHelper`. |
+| NoStatePrefetch / LCPP* / AutoSpeculationRules | chrome-only hoặc tắt mặc định | không thêm | Không có tác dụng. |
+
+Không đụng tới tính năng cần cho MSE/EME (`--disable-features` của Cobalt vẫn giữ nguyên danh sách cũ).
+
+**Ưu tiên luồng**: `MediaPlaybackService` chạy trên luồng chính, không tạo luồng, không gọi
+`setThreadPriority`; thông báo `IMPORTANCE_LOW` (26+) / `PRIORITY_LOW` (24–25). Không có
+`THREAD_PRIORITY_URGENT_AUDIO` trong mã Java của Cobalt/TizenTube (luồng âm thanh của Starboard ở C++ là
+của hệ thống phát, không đổi). Không cần sửa.
+
+**Lớp phủ native**: kiểm lại theo thiết kế: −10s 56dp · Phát/Tạm dừng 72dp · +10s 56dp ở giữa, Quay lại
+trái-trên, Tìm kiếm phải-trên, Trước/Tiếp ở mép dưới ngay trên dải 40dp thanh tua, tự ẩn 3 s. **Đã sửa**:
+chạm vào nền lớp phủ trước đây ẩn lớp phủ; nay mọi chạm lên lớp phủ (nút **và** nền) đều đếm lại 3 s
+(chạm vào dải thanh tua vẫn ẩn và chuyển xuống trang, chạm ngoài khung vẫn ẩn).
+
 ## 12. Kết quả kiểm tra (không build toàn bộ)
+
+### Lượt v7c/v7d
+
+* Harness 82/82, host guard 23/23, `node --check` mọi JS, Java `javalang` 5 tệp OK (chưa biên dịch).
+* Trang thật (`/workspace/TizenTubeCobalt-test/results_v7c.json`) **41/41** ở 900×700, 427×480,
+  507×480, 640×720, 1280×480@1,5: video 60 fps → player không có mức p60, đo ~30 fps; mặc định ≤ 30 fps;
+  không có bình luận / thẻ "Bình luận" sau 10 s (thẻ thật của m.youtube.com là
+  `yt-video-metadata-carousel-view-model` chứa `yt-comment-teaser-carousel-item-view-model`, nay bị ẩn
+  + làm rỗng); nút "Chỉ nghe" 48 px ngay dưới trình phát (đầu `.watch-below-the-player`, không bị che);
+  Chỉ nghe: 144p, video ẩn nhưng đang phát, ảnh bìa + tiêu đề, giữ qua video kế, tắt thì quay về mức
+  "Chất lượng"; bảng có "Cho phép 60fps" + "Chỉ nghe".
+* Hồi quy v7 95/96 + 17/17 chạy lại 1280×480 (K1 dùng 480p: tua lùi ở 720p trong Chrome headless lỗi
+  media **cả khi không có userscript**, `probe_ctrl_seek.js`), v7b 17/17.
 
 ### Lượt v7
 

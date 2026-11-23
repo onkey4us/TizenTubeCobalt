@@ -79,7 +79,13 @@
     codec: 'auto',
     // v7b quality cap (module 22): 'auto' = 480p target / 720p cap in the normal layout,
     // up to 1080p in wide fill / fullscreen; or a fixed cap.
-    quality: 'auto'
+    quality: 'auto',
+    // v7c: allow 60 fps formats (default off: <= 30 fps, see module 07).
+    fps60: false,
+    // v7c "Chỉ nghe": audio only, lowest video quality, video pixels hidden.
+    audioOnly: false,
+    // v7c: comments are not loaded on watch pages unless tapped.
+    comments: false
   };
   var ENUMS = { videoFit: ['fit', 'fill'], onLeave: ['audio', 'pip', 'stop'], codec: ['auto', 'h264'],
     quality: ['auto', '480', '720', '1080'] };
@@ -101,6 +107,13 @@
     quality: 'Chất lượng',
     qualityOptions: { auto: 'Tự động', '480': '480p', '720': '720p', '1080': '1080p' },
     qualityNote: 'Tự động: 480p trong khung nhỏ (tối đa 720p), tới 1080p khi toàn màn hình.',
+    fps60: 'Cho phép 60fps',
+    fps60Note: 'Mặc định tối đa 30fps (màn xe 50Hz). Có hiệu lực từ video tiếp theo.',
+    audioOnly: 'Chỉ nghe (ẩn hình, 144p)',
+    audioOnlyShort: 'Chỉ nghe',
+    audioOnlyOff: 'Hiện hình',
+    comments: 'Bình luận',
+    commentsShow: 'Hiện bình luận',
     codec: 'Codec',
     codecOptions: { auto: 'Tự động (chặn AV1)', h264: 'Ưu tiên H.264' },
     codecNote: 'Đổi codec có hiệu lực từ video tiếp theo.',

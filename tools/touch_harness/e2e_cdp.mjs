@@ -373,6 +373,36 @@ try {
   await ev(`document.querySelector('#mock-related .ttm-more').click()`); await sleep(300);
   check('v7b "Xem thêm" shows all items', (await ev(`[...document.querySelectorAll('#mock-related ytm-video-with-context-renderer')].filter(e => getComputedStyle(e).display !== 'none').length`)) === 12);
 
+  // ------------------------------------------------------------- v7c checks
+  const fps = await ev(`({ f30: MediaSource.isTypeSupported('video/mp4; codecs="avc1.4d401f"; width=1280; height=720; framerate=30'),
+    f60: MediaSource.isTypeSupported('video/mp4; codecs="avc1.4d401f"; width=1280; height=720; framerate=60') })`);
+  await ev(`TTM.setSetting('fps60', true)`);
+  const fps60on = await ev(`MediaSource.isTypeSupported('video/mp4; codecs="avc1.4d401f"; width=1280; height=720; framerate=60')`);
+  await ev(`TTM.setSetting('fps60', false)`);
+  check('v7c fps: 30 ✓, 60 ✗ by default; "Cho phép 60fps" → 60 ✓', fps.f30 && !fps.f60 && fps60on === true, JSON.stringify({ fps, fps60on }));
+  await ev(`(() => { const v = document.querySelector('#movie_player video'); return v.play().catch(()=>{}); })()`); await sleep(500);
+  await ev(`TTM.setSetting('audioOnly', true)`); await sleep(1800);
+  const ao = await ev(`(() => { const v = document.querySelector('#movie_player video'); const a = document.getElementById('ttm-artwork');
+    return { cls: document.documentElement.classList.contains('ttm-audio-only'), opacity: getComputedStyle(v).opacity, paused: v.paused,
+      art: !!a && getComputedStyle(a).display, bg: a && a.style.backgroundImage.slice(0, 60), range: window.__harnessQuality.range,
+      chip: (document.querySelector('[data-ttm-audio-toggle]') || {}).textContent }; })()`);
+  check('v7c Chỉ nghe: video hidden (opacity 0) but playing, artwork shown, quality tiny', ao.cls && ao.opacity === '0' && !ao.paused && ao.art === 'flex' && /i\.ytimg\.com\/vi\//.test(ao.bg) && JSON.stringify(ao.range) === '["tiny","tiny"]' && ao.chip === 'Hiện hình', JSON.stringify(ao));
+  // The quick toggle lives under the player in the normal layout (hidden in wide fill).
+  await ev(`TTM.layout.exit('test', true)`); await sleep(400);
+  const chipR = await ev(`(() => { const c = document.querySelector('[data-ttm-audio-toggle]').getBoundingClientRect(), p = document.getElementById('player-container-id').getBoundingClientRect();
+    return { h: Math.round(c.height), w: Math.round(c.width), belowPlayer: c.top >= p.bottom - 0.5 }; })()`);
+  check('v7c quick toggle ≥48px and below the player (no overlap with overlay/seek bar)', chipR.h >= 48 && chipR.w >= 48 && chipR.belowPlayer, JSON.stringify(chipR));
+  await ev(`document.querySelector('[data-ttm-audio-toggle]').click()`); await sleep(800);
+  const aoOff = await ev(`(() => ({ cls: document.documentElement.classList.contains('ttm-audio-only'), opacity: getComputedStyle(document.querySelector('#movie_player video')).opacity, fill: TTM.layout.mode, range: window.__harnessQuality.range }))()`);
+  // Harness mock <video> is opacity:0 by its own CSS (a canvas draws the frame): check that our
+  // rule no longer applies, i.e. the ttm-audio-only class is gone.
+  check('v7c Chỉ nghe off (quick toggle): audio-only class gone, quality back to Chất lượng', !aoOff.cls && JSON.stringify(aoOff.range) !== '["tiny","tiny"]', JSON.stringify(aoOff));
+  const com = await ev(`(() => { const c = document.getElementById('mock-comments'); return { display: getComputedStyle(c).display, children: c.children.length }; })()`);
+  check('v7c comments hidden and emptied by default', com.display === 'none' && com.children === 0, JSON.stringify(com));
+  const car = await ev(`({ comments: getComputedStyle(document.getElementById('mock-comment-carousel')).display, other: getComputedStyle(document.getElementById('mock-other-carousel')).display,
+    rowParent: document.querySelector('.ttm-row').parentElement.id, rowFirst: document.getElementById('mock-below').firstElementChild.className })`);
+  check('v7d comment metadata carousel hidden, other carousels kept, toggle row first in .watch-below-the-player', car.comments === 'none' && car.other !== 'none' && car.rowParent === 'mock-below' && car.rowFirst === 'ttm-row', JSON.stringify(car));
+
   const errs = consoleMsgs.filter(m => /EXCEPTION|^error/.test(m) && !/JSDelivr/.test(m));
   check('no JS exceptions / console errors', errs.length === 0, errs.join(' | '));
 } catch (e) {
