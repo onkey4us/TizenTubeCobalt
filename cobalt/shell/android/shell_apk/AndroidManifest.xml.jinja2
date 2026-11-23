@@ -72,7 +72,11 @@
                   android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
                   android:windowSoftInputMode="adjustResize"
                   {% if tizentube_mobile %}
-                  android:screenOrientation="sensorLandscape"
+                  {# v6: no orientation lock. Car head units run apps in resizable split panes
+                     (near-square middle pane on a 1920x720 screen); configChanges above covers
+                     screenSize/smallestScreenSize/screenLayout/orientation, so resizing does
+                     not recreate the activity or reload the page. #}
+                  android:resizeableActivity="true"
                   {% endif %}
                   android:supportsPictureInPicture="true"
                   android:exported="true">
@@ -112,6 +116,13 @@
             </intent-filter>
         </activity>
         {% endblock %}
+
+        {% if tizentube_mobile %}
+        {# TizenTube background audio ("Khi chuyển app" = "Chỉ phát âm thanh"). #}
+        <service android:name="dev.cobalt.media.MediaPlaybackService"
+                 android:exported="false"
+                 android:foregroundServiceType="mediaPlayback" />
+        {% endif %}
 
         <activity android:name="dev.cobalt.coat.CobaltPictureInPictureActivity"
                   android:exported="false"

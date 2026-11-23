@@ -66,6 +66,64 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
   private Bitmap mArtworkImage;
   private final MediaSessionCompat.Callback mMediaSessionCallback;
   private LifecycleCallback mLifecycleCallback = null;
+  // TizenTube v6 background playback: when true, onActivityStop() keeps the session.
+  private boolean mKeepActiveInBackground;
+  private PlaybackListener mPlaybackListener;
+
+  /** TizenTube: notified on the main thread when the playing state/metadata changes. */
+  public interface PlaybackListener {
+    void onPlaybackChanged(boolean playing);
+  }
+
+  public void setPlaybackListener(PlaybackListener listener) {
+    mPlaybackListener = listener;
+  }
+
+  /**
+   * TizenTube background playback: keep the MediaSession active while the activity is
+   * stopped (audio continues, notification and media keys keep working).
+   */
+  public void setKeepActiveInBackground(boolean keep) {
+    mKeepActiveInBackground = keep;
+  }
+
+  /** True when the page's MediaSession reports controllable, unpaused playback. */
+  public boolean isPlaying() {
+    return mIsControllable && !mIsPaused && mMetadata != null;
+  }
+
+  @Nullable
+  public MediaSessionCompat.Token getSessionToken() {
+    return mMediaSession != null ? mMediaSession.getSessionToken() : null;
+  }
+
+  @Nullable
+  public String getTitle() {
+    return mMetadata != null ? mMetadata.getTitle() : null;
+  }
+
+  @Nullable
+  public String getArtist() {
+    return mMetadata != null ? mMetadata.getArtist() : null;
+  }
+
+  @Nullable
+  public Bitmap getArtwork() {
+    return mArtworkImage;
+  }
+
+  /** Play/pause from the background notification, same path as media keys. */
+  public void sendPlayPause() {
+    mMainHandler.post(
+        () -> {
+          if (mMediaSessionObserver == null) {
+            return;
+          }
+          mMediaSessionObserver
+              .getMediaSession()
+              .didReceiveAction(mIsPaused ? MediaSessionAction.PLAY : MediaSessionAction.PAUSE);
+        });
+  }
 
   // TODO: decouple LifecycleCallback and CobaltMediaSession implementation.
   /** LifecycleCallback to notify listeners when |mediaSession| becomes active or inactive. */
@@ -187,6 +245,12 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
   }
 
   public void onActivityStop() {
+    if (mKeepActiveInBackground) {
+      // TizenTube background audio: the session must stay active for the foreground
+      // service notification and media keys.
+      Log.i(TAG, "MediaSession kept active in background (TizenTube background playback).");
+      return;
+    }
     // A workaround to deactivate media session before the app enters background to avoid
     // b/424538093.
     deactivateMediaSession();
@@ -301,6 +365,9 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
     if (!mIsControllable) {
       deactivateMediaSession();
       toggleKeepScreenOn(false);
+      if (mPlaybackListener != null) {
+        mPlaybackListener.onPlaybackChanged(false);
+      }
       return;
     }
 
@@ -330,6 +397,9 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
 
     PlaybackStateCompat playbackState = playbackStateBuilder.build();
     mMediaSession.setPlaybackState(playbackState);
+    if (mPlaybackListener != null) {
+      mPlaybackListener.onPlaybackChanged(state == PlaybackStateCompat.STATE_PLAYING);
+    }
 
     Log.i(
         TAG,
@@ -375,6 +445,9 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
     // Set mediaSession's metadata to update the "Now Playing Card".
     MediaMetadataCompat metadata = metadataBuilder.build();
     mMediaSession.setMetadata(metadata);
+    if (mPlaybackListener != null) {
+      mPlaybackListener.onPlaybackChanged(isPlaying());
+    }
 
     Log.i(
         TAG,

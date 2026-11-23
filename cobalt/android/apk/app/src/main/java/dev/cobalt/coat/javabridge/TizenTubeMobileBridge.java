@@ -14,33 +14,68 @@
 
 package dev.cobalt.coat.javabridge;
 
-import android.app.Activity;
 import android.content.Context;
-import android.media.AudioManager;
-import android.provider.Settings;
-import android.view.WindowManager;
-import java.lang.ref.WeakReference;
+import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 
 /**
  * JavaScript bridge used by the bundled TizenTube mobile userscript
- * (assets/tizentube_mobile/tizentube_mobile.js) for the player swipe gestures.
+ * (cobalt/shell/embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_*.js).
  *
- * <p>Exposed to JS as {@code window.TizenTubeMobile}. Only injected when the app runs in mobile
- * UI mode, and restricted to YouTube origins (see CobaltActivity#initializeJavaBridge).
+ * <p>Exposed to JS as {@code window.TizenTubeMobile} by Cobalt's JavaBridge
+ * (CobaltActivity#initializeJavaBridge, JavascriptInjector.addPossiblyUnsafeInterface), only in
+ * mobile UI mode and only for YouTube origins. Methods annotated with
+ * {@link CobaltJavaScriptInterface} are callable from JS; they run on a binder/background thread,
+ * so state changes are posted to the main thread.
  *
- * <p>All levels are floats in [0, 1].
+ * <p>v6: carries the "Khi chuyển app" (leave) mode and the page's playing state to Java. The
+ * mode is persisted in SharedPreferences so CobaltActivity knows it in onUserLeaveHint / onStop
+ * even before (or without) a page being loaded. The v5 volume/brightness methods are gone.
  */
 public class TizenTubeMobileBridge implements CobaltJavaScriptAndroidObject {
-  private final WeakReference<Activity> mActivity;
-  private final AudioManager mAudioManager;
+  /** Keep audio playing in the background (default). */
+  public static final String LEAVE_AUDIO = "audio";
+  /** Enter picture-in-picture (falls back to LEAVE_AUDIO when unavailable). */
+  public static final String LEAVE_PIP = "pip";
+  /** Stock behaviour: page hidden, media pauses. */
+  public static final String LEAVE_STOP = "stop";
 
-  // Last brightness requested by JS. -1 means "follow system brightness".
-  private volatile float mWindowBrightness = -1f;
+  private static final String PREFS = "tizentube_mobile";
+  private static final String KEY_LEAVE_MODE = "leave_mode";
 
-  public TizenTubeMobileBridge(Activity activity) {
-    mActivity = new WeakReference<>(activity);
-    mAudioManager =
-        (AudioManager) activity.getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
+  /** Main-thread callbacks into CobaltActivity. */
+  public interface Listener {
+    void onLeaveModeChanged(String mode);
+
+    void onPagePlayingChanged(boolean playing);
+  }
+
+  private final SharedPreferences mPrefs;
+  private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+  private final Listener mListener;
+  private volatile boolean mPagePlaying;
+
+  public TizenTubeMobileBridge(Context context, Listener listener) {
+    mPrefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    mListener = listener;
+  }
+
+  /** Reads the persisted leave mode; usable before any page has loaded. */
+  public static String readLeaveMode(Context context) {
+    String mode =
+        context
+            .getApplicationContext()
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LEAVE_MODE, LEAVE_AUDIO);
+    return sanitize(mode);
+  }
+
+  private static String sanitize(String mode) {
+    if (LEAVE_PIP.equals(mode) || LEAVE_STOP.equals(mode)) {
+      return mode;
+    }
+    return LEAVE_AUDIO;
   }
 
   @Override
@@ -48,93 +83,39 @@ public class TizenTubeMobileBridge implements CobaltJavaScriptAndroidObject {
     return "TizenTubeMobile";
   }
 
-  private static float clamp01(float v) {
-    if (Float.isNaN(v)) {
-      return 0f;
-    }
-    return Math.max(0f, Math.min(1f, v));
-  }
-
-  /** Returns the current window brightness, or the system brightness if not overridden. */
-  @CobaltJavaScriptInterface
-  public float getBrightness() {
-    if (mWindowBrightness >= 0f) {
-      return mWindowBrightness;
-    }
-    Activity activity = mActivity.get();
-    if (activity == null) {
-      return 0.5f;
-    }
-    try {
-      int sys =
-          Settings.System.getInt(
-              activity.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS);
-      return clamp01(sys / 255f);
-    } catch (Settings.SettingNotFoundException e) {
-      return 0.5f;
-    }
-  }
-
-  /**
-   * Sets this window's brightness (WindowManager.LayoutParams#screenBrightness). Does not change
-   * the system setting, so no WRITE_SETTINGS permission is needed and leaving the app restores
-   * the user's brightness.
-   */
-  @CobaltJavaScriptInterface
-  public void setBrightness(float level) {
-    final float value = Math.max(0.01f, clamp01(level));
-    mWindowBrightness = value;
-    final Activity activity = mActivity.get();
-    if (activity == null) {
-      return;
-    }
-    activity.runOnUiThread(
-        () -> {
-          if (activity.isFinishing() || activity.isDestroyed()) {
-            return;
-          }
-          WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
-          lp.screenBrightness = value;
-          activity.getWindow().setAttributes(lp);
-        });
-  }
-
-  /** Returns STREAM_MUSIC volume in [0, 1]. */
-  @CobaltJavaScriptInterface
-  public float getVolume() {
-    if (mAudioManager == null) {
-      return -1f;
-    }
-    int max = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-    if (max <= 0) {
-      return -1f;
-    }
-    return clamp01(mAudioManager.getStreamVolume(AudioManager.STREAM_MUSIC) / (float) max);
-  }
-
-  /** Sets STREAM_MUSIC volume without showing the system volume UI. Returns the applied level. */
-  @CobaltJavaScriptInterface
-  public float setVolume(float level) {
-    if (mAudioManager == null) {
-      return -1f;
-    }
-    int max = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-    if (max <= 0) {
-      return -1f;
-    }
-    int index = Math.round(clamp01(level) * max);
-    try {
-      mAudioManager.setStreamVolume(AudioManager.STREAM_MUSIC, index, /* flags= */ 0);
-    } catch (SecurityException e) {
-      // Do Not Disturb policy can reject volume changes.
-      return -1f;
-    }
-    return index / (float) max;
-  }
-
-  /** Version of this bridge so the userscript can feature-detect. */
+  /** Version of this bridge so the userscript can feature-detect. 2 = v6 (leave mode). */
   @CobaltJavaScriptInterface
   public int getBridgeVersion() {
-    return 1;
+    return 2;
+  }
+
+  @CobaltJavaScriptInterface
+  public String getLeaveMode() {
+    return sanitize(mPrefs.getString(KEY_LEAVE_MODE, LEAVE_AUDIO));
+  }
+
+  /** Called by the userscript whenever the "Khi chuyển app" setting is saved. */
+  @CobaltJavaScriptInterface
+  public void setLeaveMode(String mode) {
+    final String value = sanitize(mode);
+    if (value.equals(getLeaveMode())) {
+      return;
+    }
+    mPrefs.edit().putString(KEY_LEAVE_MODE, value).apply();
+    mMainHandler.post(() -> mListener.onLeaveModeChanged(value));
+  }
+
+  /** Called by the userscript when the main watch-page video starts/stops playing. */
+  @CobaltJavaScriptInterface
+  public void setPlaying(boolean playing) {
+    if (mPagePlaying == playing) {
+      return;
+    }
+    mPagePlaying = playing;
+    mMainHandler.post(() -> mListener.onPagePlayingChanged(playing));
+  }
+
+  public boolean isPagePlaying() {
+    return mPagePlaying;
   }
 }

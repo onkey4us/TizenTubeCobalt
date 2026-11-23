@@ -16,7 +16,13 @@ package dev.cobalt.coat;
 
 import static dev.cobalt.util.Log.TAG;
 
+import android.app.PictureInPictureParams;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.util.Rational;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -50,6 +56,7 @@ import dev.cobalt.dial.DIALServer;
 import dev.cobalt.dial.DiscoveryServer;
 import dev.cobalt.media.AudioOutputManager;
 import dev.cobalt.media.MediaCodecCapabilitiesLogger;
+import dev.cobalt.media.MediaPlaybackService;
 import dev.cobalt.media.VideoSurfaceView;
 import dev.cobalt.shell.Shell;
 import dev.cobalt.shell.ShellManager;
@@ -130,6 +137,14 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   private boolean mIsCobaltUsingAndroidOverlay;
 
   private boolean mIsMobileUi;
+
+  // ---- TizenTube v6: "Khi chuyển app" (leave mode), PiP and background audio.
+  // Mode lives in SharedPreferences (TizenTubeMobileBridge), set from the userscript.
+  private String mLeaveMode = TizenTubeMobileBridge.LEAVE_AUDIO;
+  private TizenTubeMobileBridge mMobileBridge;
+  // True while the activity is stopped but kept "visible" to Chromium so audio continues.
+  private boolean mBackgroundPlaybackActive;
+  private boolean mInPictureInPicture;
   private static final long MOBILE_BACK_DEBOUNCE_MS = 300;
   private long mLastMobileBackMs;
 
@@ -224,6 +239,15 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       // navigates to Google sign-in/consent pages that do not all send one. An explicit
       // --csp-enforcement from the intent still wins because it is appended later.
       args.add("--csp-enforcement=false");
+      // Background audio (v6): Chromium's WebMediaPlayerImpl suspends/pauses media of a
+      // hidden page on Android (kIsBackgroundMediaSuspendEnabled). In mobile mode the
+      // userscript spoofs visibility and, for "Chỉ phát âm thanh"/PiP, CobaltActivity keeps
+      // the WebContents VISIBLE on onStop; this switch also stops WebMediaPlayerImpl from
+      // suspending the pipeline if the page does get hidden. Renderer backgrounding /
+      // timer throttling would slow the page's JS (SponsorBlock, playlist advance).
+      args.add("--disable-background-media-suspend");
+      args.add("--disable-renderer-backgrounding");
+      args.add("--disable-background-timer-throttling");
     }
     args.addAll(extraArgs);
     appendIntentArgs(args);
@@ -251,6 +275,8 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
     DeviceUtils.updateDeviceSpecificUserAgentSwitch(this);
     mIsMobileUi = isTizenTubeMobileUi();
     if (mIsMobileUi) {
+      mLeaveMode = TizenTubeMobileBridge.readLeaveMode(this);
+      Log.i(TAG, "TizenTube leave mode (persisted): " + mLeaveMode);
       // updateDeviceSpecificUserAgentSwitch() drops this on tablet-sized screens; m.youtube.com
       // needs the "Mobile" UA token on every device. Read by //components/embedder_support.
       CommandLine.getInstance().appendSwitch(USE_MOBILE_USER_AGENT_SWITCH);
@@ -404,6 +430,12 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
             // Inject JavaBridge objects to the WebContents.
             initializeJavaBridge();
             getStarboardBridge().setWebContents(getActiveWebContents());
+            if (mIsMobileUi) {
+              MediaPlaybackService.setController(mPlaybackController);
+              getStarboardBridge()
+                  .cobaltMediaSession()
+                  .setPlaybackListener(playing -> onTizenTubePlaybackChanged());
+            }
 
             // Load the `url` with the same shell we created above.
             mStartupUrl = ShellManagerJni.get().appendMigrationStatus(mStartupUrl);
@@ -708,7 +740,23 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
     mJavaScriptAndroidObjectList.add(new HTMLMediaElementExtension(this));
     if (mIsMobileUi) {
       // Brightness / volume bridge for the bundled m.youtube.com userscript.
-      mJavaScriptAndroidObjectList.add(new TizenTubeMobileBridge(this));
+      mMobileBridge =
+          new TizenTubeMobileBridge(
+              this,
+              new TizenTubeMobileBridge.Listener() {
+                @Override
+                public void onLeaveModeChanged(String mode) {
+                  mLeaveMode = mode;
+                  Log.i(TAG, "TizenTube leave mode: " + mode);
+                  updatePictureInPictureParams();
+                }
+
+                @Override
+                public void onPagePlayingChanged(boolean playing) {
+                  onTizenTubePlaybackChanged();
+                }
+              });
+      mJavaScriptAndroidObjectList.add(mMobileBridge);
     }
 
     // 2. Use JavascriptInjector to inject Java objects into the WebContents.
@@ -765,6 +813,17 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   @Override
   protected void onStart() {
     StartupGuard.getInstance().setStartupMilestone(StartupGuard.ACTIVITY_ON_RESUME);
+    if (mIsMobileUi) {
+      // Back in the foreground: no more background service; video decode resumes because the
+      // video SurfaceView is recreated (mForceCreateNewVideoSurfaceView) and the codec is
+      // rebuilt on the next frames.
+      if (mBackgroundPlaybackActive) {
+        Log.i(TAG, "TizenTube: returning from background playback.");
+      }
+      mBackgroundPlaybackActive = false;
+      MediaPlaybackService.stop(this);
+      getStarboardBridge().cobaltMediaSession().setKeepActiveInBackground(false);
+    }
     
     // Start DIAL servers for casting discovery
     startDIALServers();
@@ -820,6 +879,26 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   @Override
   protected void onPause() {
     mPhysicalBackKeyPressed = false;
+    if (mIsMobileUi) {
+      // TizenTube (v6): on Android 9 multi-window (car launcher split panes) onPause fires
+      // whenever another pane is touched, and on entering PiP, while we stay visible. Do
+      // not blur the page then (window 'blur' makes m.youtube.com pause / stop autoplay).
+      // The page still loses focus naturally when the window loses input focus; the
+      // userscript (module 05) hides that from the page while "Khi chuyển app" != Dừng
+      // phát. Cookies/DOM storage are still flushed in onStop().
+      Log.i(
+          TAG,
+          "TizenTube: onPause (multiWindow="
+              + isInMultiWindow()
+              + ", pip="
+              + mInPictureInPicture
+              + "), not blurring the page.");
+      if (TizenTubeMobileBridge.LEAVE_STOP.equals(mLeaveMode)) {
+        CobaltContentBrowserClient.dispatchBlur();
+      }
+      super.onPause();
+      return;
+    }
     if (useStarboardLifeCycle()) {
       AppEventBridge.handleBlurEvent(System.nanoTime() / 1000L);
     } else {
@@ -834,6 +913,12 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
     if (isNvidiaShield()) {
       unregisterDisplayListener();
     }
+    // Decide BEFORE super.onStop(): it calls StarboardBridge.onActivityStop(), which
+    // deactivates the MediaSession unless we ask it to keep it.
+    mBackgroundPlaybackActive = mIsMobileUi && shouldKeepPlayingWhenStopped();
+    if (mBackgroundPlaybackActive) {
+      getStarboardBridge().cobaltMediaSession().setKeepActiveInBackground(true);
+    }
     super.onStop();
 
     if (useStarboardLifeCycle()) {
@@ -843,6 +928,13 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       } else {
         AppEventBridge.handleConcealEvent(stopTimestamp);
       }
+    } else if (mBackgroundPlaybackActive) {
+      // TizenTube background audio: keep the WebContents VISIBLE so Blink does not fire
+      // visibilitychange/hidden and Chromium does not background the renderer or suspend
+      // the media pipeline. The video SurfaceView is destroyed by Android, so the Starboard
+      // video decoder tears down its codec (video decode pauses); audio keeps playing.
+      Log.i(TAG, "TizenTube: stopped while playing, keeping audio (mode " + mLeaveMode + ").");
+      MediaPlaybackService.start(this);
     } else {
       // visibility:hidden event
       updateShellActivityVisible(false);
@@ -923,8 +1015,207 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       OnBackInvokedHelper.unregister(this, mBackInvokedCallback);
       mBackInvokedCallback = null;
     }
+    if (mIsMobileUi) {
+      MediaPlaybackService.stop(this);
+      MediaPlaybackService.setController(null);
+    }
     super.onDestroy();
   }
+
+  // ---------------------------------------------------------------------------------------
+  // TizenTube v6: "Khi chuyển app", picture-in-picture, background audio, multi-window.
+  // ---------------------------------------------------------------------------------------
+
+  /** Playing according to Chromium's MediaSession, or the userscript (main <video>). */
+  private boolean isTizenTubePlaying() {
+    boolean session = getStarboardBridge().cobaltMediaSession().isPlaying();
+    boolean page = mMobileBridge != null && mMobileBridge.isPagePlaying();
+    return session || page;
+  }
+
+  private boolean isPipSupported() {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        && getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE);
+  }
+
+  private boolean isInMultiWindow() {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode();
+  }
+
+  /** PiP is used only when chosen, playing, supported, and not in a split-screen pane. */
+  private boolean shouldEnterPip() {
+    return TizenTubeMobileBridge.LEAVE_PIP.equals(mLeaveMode)
+        && isTizenTubePlaying()
+        && isPipSupported()
+        && !isInMultiWindow();
+  }
+
+  /** Keep audio when stopped: mode audio, or mode PiP that could not / did not enter PiP. */
+  private boolean shouldKeepPlayingWhenStopped() {
+    if (TizenTubeMobileBridge.LEAVE_STOP.equals(mLeaveMode) || !isTizenTubePlaying()) {
+      return false;
+    }
+    return true;
+  }
+
+  @Override
+  protected void onUserLeaveHint() {
+    super.onUserLeaveHint();
+    if (!mIsMobileUi || !TizenTubeMobileBridge.LEAVE_PIP.equals(mLeaveMode)) {
+      return;
+    }
+    if (!isTizenTubePlaying()) {
+      return;
+    }
+    if (isInMultiWindow()) {
+      Log.i(TAG, "TizenTube: in multi-window, not entering PiP; audio keeps playing.");
+      return;
+    }
+    if (!isPipSupported()) {
+      Log.i(
+          TAG,
+          "TizenTube: PiP unavailable (API "
+              + Build.VERSION.SDK_INT
+              + ", FEATURE_PICTURE_IN_PICTURE missing or API < 26); falling back to audio.");
+      return;
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      // Auto-enter is configured via setPictureInPictureParams (updatePictureInPictureParams).
+      return;
+    }
+    enterTizenTubePip();
+  }
+
+  @SuppressWarnings("NewApi")
+  private void enterTizenTubePip() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return;
+    }
+    try {
+      boolean ok = enterPictureInPictureMode(buildPipParams());
+      Log.i(TAG, "TizenTube: enterPictureInPictureMode -> " + ok);
+    } catch (IllegalStateException | IllegalArgumentException e) {
+      Log.w(TAG, "TizenTube: enterPictureInPictureMode failed: " + e);
+    }
+  }
+
+  @SuppressWarnings("NewApi")
+  private PictureInPictureParams buildPipParams() {
+    PictureInPictureParams.Builder b =
+        new PictureInPictureParams.Builder().setAspectRatio(new Rational(16, 9));
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      b.setAutoEnterEnabled(shouldEnterPip());
+      b.setSeamlessResizeEnabled(false);
+    }
+    return b.build();
+  }
+
+  /** API 31+: keep auto-enter in sync with mode / playing / multi-window. */
+  private void updatePictureInPictureParams() {
+    if (!mIsMobileUi || Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !isPipSupported()) {
+      return;
+    }
+    try {
+      setPictureInPictureParams(buildPipParams());
+    } catch (IllegalStateException | IllegalArgumentException e) {
+      Log.w(TAG, "TizenTube: setPictureInPictureParams failed: " + e);
+    }
+  }
+
+  /** Called on the main thread when the page/MediaSession playing state changes. */
+  void onTizenTubePlaybackChanged() {
+    updatePictureInPictureParams();
+    if (mBackgroundPlaybackActive) {
+      // Refresh the notification (play/pause icon, title). When paused it stays, with a play
+      // button, so the user can resume from the notification; it goes away in onStart() or
+      // onDestroy(), or when the task is removed.
+      MediaPlaybackService.update(this);
+    }
+  }
+
+  @Override
+  public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode,
+      Configuration newConfig) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+    if (!mIsMobileUi) {
+      return;
+    }
+    mInPictureInPicture = isInPictureInPictureMode;
+    Log.i(TAG, "TizenTube: picture-in-picture " + isInPictureInPictureMode);
+    // Tell the userscript (module 25_layout) to show only the video.
+    evaluateJavaScript(
+        "(function(on){try{document.documentElement.classList.toggle('ttm-pip',on);"
+            + "window.dispatchEvent(new CustomEvent('tizentube-pip',{detail:{active:on}}));"
+            + "}catch(e){}})("
+            + isInPictureInPictureMode
+            + ")");
+  }
+
+  @Override
+  public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
+    super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
+    // configChanges in the manifest covers screenSize/screenLayout/smallestScreenSize/
+    // orientation, so entering/leaving the car launcher's split panes only resizes the
+    // window (no activity recreation, no page reload); the userscript re-evaluates its
+    // layout on 'resize'.
+    Log.i(TAG, "TizenTube: multi-window " + isInMultiWindowMode);
+    updatePictureInPictureParams();
+  }
+
+  @Override
+  public void onConfigurationChanged(Configuration newConfig) {
+    super.onConfigurationChanged(newConfig);
+    if (mIsMobileUi) {
+      Log.i(
+          TAG,
+          "TizenTube: configuration changed "
+              + newConfig.screenWidthDp
+              + "x"
+              + newConfig.screenHeightDp
+              + "dp, orientation "
+              + newConfig.orientation);
+    }
+  }
+
+  /** Controller for MediaPlaybackService (notification + play/pause). */
+  private final MediaPlaybackService.Controller mPlaybackController =
+      new MediaPlaybackService.Controller() {
+        @Override
+        public MediaSessionCompat.Token getSessionToken() {
+          return getStarboardBridge().cobaltMediaSession().getSessionToken();
+        }
+
+        @Override
+        public boolean isPlaying() {
+          return isTizenTubePlaying();
+        }
+
+        @Override
+        public String getTitle() {
+          return getStarboardBridge().cobaltMediaSession().getTitle();
+        }
+
+        @Override
+        public String getArtist() {
+          return getStarboardBridge().cobaltMediaSession().getArtist();
+        }
+
+        @Override
+        public Bitmap getArtwork() {
+          return getStarboardBridge().cobaltMediaSession().getArtwork();
+        }
+
+        @Override
+        public void playPause() {
+          getStarboardBridge().cobaltMediaSession().sendPlayPause();
+        }
+
+        @Override
+        public Intent getLaunchIntent() {
+          return new Intent(CobaltActivity.this, CobaltActivity.this.getClass())
+              .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        }
+      };
 
   public void onSplashScreenHidden() {
     mHasHiddenSplashScreen = true;
