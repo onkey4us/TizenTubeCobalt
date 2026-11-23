@@ -44,9 +44,11 @@ import android.widget.FrameLayout;
  * circles, white glyphs, hit area 56dp (Play/Pause 72dp), scaled down to fit a small player but
  * never below 48dp. Shown by {@link #observe(MotionEvent)} on a single tap on the player (after
  * the double-tap timeout, so YouTube's native double-tap seek still works); auto-hides after 3 s,
- * every button press restarts the timer. Hidden = GONE, so it never intercepts touches. When
- * shown, a tap outside the buttons only hides it (consumed), except in the bottom seek-bar strip,
- * which is passed through to the page.
+ * every tap on the overlay (buttons AND its background) restarts the timer (designer spec, v7c).
+ * Hidden = GONE, so it never intercepts touches. When shown, taps on the overlay background are
+ * consumed (they only restart the timer, so YouTube does not toggle its own controls), taps in
+ * the bottom seek-bar strip hide it and pass through to the page, taps outside the player box
+ * (e.g. the related list) hide it and pass through.
  */
 public class TizenTubeOverlay extends FrameLayout {
   /** Button actions; handled by CobaltActivity (page command channel / Activity back). */
@@ -270,14 +272,14 @@ public class TizenTubeOverlay extends FrameLayout {
   @Override
   public boolean onTouchEvent(MotionEvent ev) {
     // Reaches here only for touches that no button took. Bottom strip (YouTube seek bar):
-    // pass through to the page. Elsewhere: hide on tap, consume so the page does not also
-    // toggle its controls.
+    // hide and pass through to the page. Elsewhere on the overlay background: consume and
+    // restart the 3 s auto-hide timer (every tap on the overlay resets it).
     if (ev.getActionMasked() == MotionEvent.ACTION_DOWN && ev.getY() > getHeight() - dp(SEEK_STRIP_DP)) {
       hide();
       return false;
     }
-    if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
-      hide();
+    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN || ev.getActionMasked() == MotionEvent.ACTION_UP) {
+      restartAutoHide();
     }
     return true;
   }

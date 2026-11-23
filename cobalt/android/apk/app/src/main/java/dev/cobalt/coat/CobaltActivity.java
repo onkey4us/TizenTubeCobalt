@@ -261,11 +261,51 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       args.add("--disable-background-media-suspend");
       args.add("--disable-renderer-backgrounding");
       args.add("--disable-background-timer-throttling");
+      addMemoryFlags(args, extraArgs);
     }
     args.addAll(extraArgs);
     appendIntentArgs(args);
     return args;
   }
+
+  /**
+   * TizenTube v7c memory/CPU flags (mobile mode only). Each switch was checked to exist in this
+   * source tree; see docs/TOUCH_MOBILE.md "Cờ bộ nhớ" for the full audit.
+   *  - --renderer-process-limit=1 (content_switches, read in BrowserMainLoop): one renderer even
+   *    if --single-process is ever dropped (Cobalt already passes --single-process).
+   *  - --disable-site-isolation-trials (content_switches kDisableSiteIsolation): no OOPIF /
+   *    per-site processes for m.youtube.com's iframes (ads, sign-in).
+   *  - V8 old space 512 MB -> 256 MB (and initial 64 -> 32): replaces the values in the
+   *    --js-flags that JavaSwitches emits instead of appending a second --js-flags (V8 keeps the
+   *    last value, CommandLineOverrideHelper merges ";"-separated --js-flags entries).
+   *  - --disable-features=NavigationPredictor (blink, enabled by default): the anchor-element
+   *    metrics it collects for preloading have no consumer in content shell.
+   * Not added (do not exist / have no effect here): --disk-cache-size and --media-cache-size
+   * are chrome/ switches Cobalt never reads (Cobalt sizes the HTTP cache from
+   * kSbMaxSystemPathCacheDirectorySize = 24 MiB, override --max-http-cache-size, which is
+   * already below 32 MB; the media cache is Starboard's); --disable-background-networking is a
+   * chrome/ switch with no consumer in content/cobalt; prefetch/preconnect features
+   * (NoStatePrefetch, LCPP*, AutoSpeculationRules) are chrome-only or disabled by default.
+   */
+  private static void addMemoryFlags(List<String> args, List<String> extraArgs) {
+    args.add("--renderer-process-limit=1");
+    args.add("--disable-site-isolation-trials");
+    args.add("--disable-features=NavigationPredictor");
+    for (int i = 0; i < extraArgs.size(); i++) {
+      String arg = extraArgs.get(i);
+      if (arg.startsWith("--js-flags=")) {
+        extraArgs.set(
+            i,
+            arg.replace("--max-old-space-size=" + JavaSwitches.DEFAULT_MAX_OLD_SPACE_SIZE,
+                    "--max-old-space-size=" + TIZENTUBE_MAX_OLD_SPACE_MB)
+                .replace("--initial-old-space-size=" + JavaSwitches.DEFAULT_INITIAL_OLD_SPACE_SIZE,
+                    "--initial-old-space-size=" + TIZENTUBE_INITIAL_OLD_SPACE_MB));
+      }
+    }
+  }
+
+  private static final String TIZENTUBE_MAX_OLD_SPACE_MB = "256";
+  private static final String TIZENTUBE_INITIAL_OLD_SPACE_MB = "32";
 
   /** True when the APK was built with tizentube_mobile_ui=true (manifest meta-data). */
   protected boolean isTizenTubeMobileUi() {
