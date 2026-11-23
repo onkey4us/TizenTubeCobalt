@@ -14,6 +14,11 @@
  *        inline player containers inside feed items) are display:none;
  *     c. a guard: any <video> outside the watch/shorts player is paused, emptied and
  *        its play() rejected, so nothing can play in the feed even if a. and b. miss.
+ * 3. (v7b) Thumbnails: every <img> gets loading="lazy" + decoding="async" (also the
+ *    ones YouTube adds later; one cheap MutationObserver), image preload/prefetch
+ *    <link>s are dropped. The watch page's related list shows the first
+ *    RELATED_CAP items; a "Xem thêm" row reveals the rest (YouTube's own
+ *    continuation keeps working after that, it only loads when scrolled to).
  * 2. No transitions / animations / box-shadow / backdrop-filter page-wide, and no
  *    "cinematic" ambient glow behind the player (a blurred canvas redrawn every
  *    frame). Durations are set to ~0 (1 ms) instead of `none` so YouTube's
@@ -141,5 +146,97 @@
     if (v && v.tagName === 'VIDEO' && !isMainPlayerVideo(v)) kill(v, 'playing outside watch player');
   }, true);
 
-  TTM.light = { stats: stats, isMainPlayerVideo: isMainPlayerVideo, scrubFlags: scrubFlags };
+  // ------------------------------------------- 3. thumbnails + related
+  var RELATED_CAP = 8;
+  var RELATED_ITEM = 'ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-compact-radio-renderer,' +
+    ' ytm-compact-playlist-renderer, ytm-rich-item-renderer';
+  stats.lazyImgs = 0;
+  stats.droppedPreloads = 0;
+  TTM.addStyle([
+    // Related list cap: hide items past RELATED_CAP and the continuation trigger until
+    // "Xem thêm" (html.ttm-related-all). Only on watch pages (body has the list there).
+    'html.ttm-watch:not(.ttm-related-all) ytm-single-column-watch-next-results-renderer ',
+    '[data-ttm-rel-over],html.ttm-watch:not(.ttm-related-all) ',
+    'ytm-single-column-watch-next-results-renderer ytm-continuation-item-renderer{display:none!important}',
+    '.ttm-more{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin:4px 0 12px;',
+    'border:1px solid rgba(127,127,127,.4);border-radius:24px;background:transparent;color:inherit;',
+    'font:500 14px Roboto,Arial,sans-serif;cursor:pointer}',
+    'html.ttm-related-all .ttm-more{display:none}'
+  ].join(''));
+
+  function lazify(img) {
+    if (img.getAttribute('loading') !== 'lazy') { img.setAttribute('loading', 'lazy'); stats.lazyImgs++; }
+    if (img.getAttribute('decoding') !== 'async') img.setAttribute('decoding', 'async');
+  }
+  function dropPreload(link) {
+    var rel = (link.getAttribute('rel') || '').toLowerCase();
+    if (!/preload|prefetch/.test(rel)) return;
+    var as = (link.getAttribute('as') || '').toLowerCase(), href = link.getAttribute('href') || '';
+    if (as === 'image' || /\/vi(_webp)?\/|ytimg\.com\/.*\.(jpg|webp|png)/.test(href)) {
+      link.remove();
+      stats.droppedPreloads++;
+    }
+  }
+
+  var moreBtn = null;
+  function capRelated() {
+    var root = document.querySelector('ytm-single-column-watch-next-results-renderer');
+    var watch = !!(TTM.player && TTM.player.currentVideoId());
+    document.documentElement.classList.toggle('ttm-watch', watch && !!root);
+    if (!watch || !root) return;
+    var items = root.querySelectorAll(RELATED_ITEM);
+    for (var i = 0; i < items.length; i++) {
+      if (i >= RELATED_CAP) items[i].setAttribute('data-ttm-rel-over', '');
+      else items[i].removeAttribute('data-ttm-rel-over');
+    }
+    if (items.length > RELATED_CAP || root.querySelector('ytm-continuation-item-renderer')) {
+      var anchor = items[Math.min(RELATED_CAP, items.length) - 1];
+      if (!moreBtn) {
+        moreBtn = TTM.el('button', { type: 'button', 'class': 'ttm-more' }, ['Xem thêm']);
+        moreBtn.addEventListener('click', function () {
+          document.documentElement.classList.add('ttm-related-all');
+          TTM.log('light: related list expanded');
+        });
+      }
+      if (anchor && moreBtn.previousElementSibling !== anchor) anchor.insertAdjacentElement('afterend', moreBtn);
+    }
+  }
+  var lastVid = null;
+  function onNewVideo() {
+    var id = TTM.player && TTM.player.currentVideoId();
+    if (id !== lastVid) { lastVid = id; document.documentElement.classList.remove('ttm-related-all'); }
+  }
+
+  var queued = false;
+  function scan() {
+    queued = false;
+    var imgs = document.getElementsByTagName('img');
+    for (var i = 0; i < imgs.length; i++) lazify(imgs[i]);
+    var links = document.querySelectorAll('link[rel~="preload"], link[rel~="prefetch"]');
+    for (var j = 0; j < links.length; j++) dropPreload(links[j]);
+    onNewVideo();
+    capRelated();
+  }
+  TTM.onReady(function () {
+    scan();
+    new MutationObserver(function (muts) {
+      // Fast path for images: lazify added <img> right away (before they start loading).
+      for (var m = 0; m < muts.length; m++) {
+        var added = muts[m].addedNodes;
+        for (var n = 0; n < added.length; n++) {
+          var node = added[n];
+          if (node.nodeType !== 1) continue;
+          if (node.tagName === 'IMG') lazify(node);
+          else if (node.tagName === 'LINK') dropPreload(node);
+          else if (node.getElementsByTagName) {
+            var sub = node.getElementsByTagName('img');
+            for (var k = 0; k < sub.length; k++) lazify(sub[k]);
+          }
+        }
+      }
+      if (!queued) { queued = true; requestAnimationFrame(scan); }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+
+  TTM.light = { stats: stats, isMainPlayerVideo: isMainPlayerVideo, scrubFlags: scrubFlags, RELATED_CAP: RELATED_CAP, capRelated: capRelated };
 })();

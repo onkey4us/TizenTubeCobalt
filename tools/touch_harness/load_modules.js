@@ -11,6 +11,7 @@
     'tizentube_mobile_08_light.js',
     'tizentube_mobile_10_adblock.js',
     'tizentube_mobile_20_player.js',
+    'tizentube_mobile_22_quality.js',
     'tizentube_mobile_25_layout.js',
     'tizentube_mobile_30_settings.js',
     'tizentube_mobile_40_background.js'

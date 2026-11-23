@@ -167,7 +167,9 @@
   function radioGroup(key, title, options, current) {
     var fs = TTM.el('fieldset', { 'class': 'ttm-group', 'data-ttm-setting': key });
     fs.appendChild(TTM.el('legend', null, [title]));
-    Object.keys(options).forEach(function (value) {
+    // Order from TTM.ENUMS: object key order would put '480'/'720' before 'auto'.
+    var order = (TTM.ENUMS[key] || Object.keys(options)).filter(function (v) { return v in options; });
+    order.forEach(function (value) {
       var input = TTM.el('input', { type: 'radio', name: 'ttm-' + key, value: value });
       input.checked = value === current;
       input.addEventListener('change', function () { if (input.checked) TTM.setSetting(key, value); });
@@ -241,6 +243,9 @@
     sheet.appendChild(checkbox(S.autoFullscreen, st.autoFullscreen,
       function (v) { TTM.setSetting('autoFullscreen', v); }));
     sheet.appendChild(radioGroup('onLeave', S.onLeave, S.onLeaveOptions, st.onLeave));
+    var qualityGroup = radioGroup('quality', S.quality, S.qualityOptions, st.quality);
+    qualityGroup.appendChild(TTM.el('p', { 'class': 'ttm-note' }, [S.qualityNote]));
+    sheet.appendChild(qualityGroup);
     var codecGroup = radioGroup('codec', S.codec, S.codecOptions, st.codec);
     codecGroup.appendChild(TTM.el('p', { 'class': 'ttm-note' }, [S.codecNote]));
     sheet.appendChild(codecGroup);

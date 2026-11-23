@@ -28,9 +28,31 @@
     return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
   }
   var mainSrc = silentWav(60), adSrc = silentWav(15);
+  // ------------------------------------------- mock related list (12)
+  (function () {
+    var list = document.getElementById('mock-related-list');
+    for (var i = 1; i <= 12; i++) {
+      var it = document.createElement('ytm-video-with-context-renderer');
+      it.className = 'tile';
+      var img = document.createElement('img');
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+      img.width = 40; img.height = 24;
+      it.appendChild(img);
+      it.appendChild(document.createTextNode(' Liên quan ' + i));
+      list.appendChild(it);
+    }
+  })();
+
   var player = $('movie_player');
   var video = player.querySelector('video');
   video.src = mainSrc;
+
+  // Mock m.youtube quality API (names as on the real site).
+  var Q = { levels: ['hd1080', 'hd720', 'large', 'medium', 'small', 'tiny', 'auto'], cur: 'medium', range: null };
+  player.getAvailableQualityLevels = function () { return Q.levels.slice(); };
+  player.getPlaybackQuality = function () { return Q.cur; };
+  player.setPlaybackQualityRange = function (min, max) { Q.range = [min, max]; Q.cur = min; window.harnessLog('player: quality range ' + min + '..' + max); };
+  window.__harnessQuality = Q;
 
   var canvas = $('frame'), ctx = canvas.getContext('2d');
   function fmt(t) { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + ('0' + t % 60).slice(-2); }

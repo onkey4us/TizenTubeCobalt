@@ -56,6 +56,11 @@
       </div>
       <p class="hint">Bật mô phỏng cảm ứng trong DevTools (Ctrl+Shift+M). Vuốt dọc nửa trái = độ sáng,
         nửa phải = âm lượng. Chạm / chạm đúp vẫn thuộc về trình phát (log "native tap").</p>
+      <!-- Mock watch-next list (m.youtube.com markup), 12 items + continuation. -->
+      <ytm-single-column-watch-next-results-renderer id="mock-related">
+        <ytm-item-section-renderer><lazy-list id="mock-related-list"></lazy-list>
+          <ytm-continuation-item-renderer>…</ytm-continuation-item-renderer></ytm-item-section-renderer>
+      </ytm-single-column-watch-next-results-renderer>
     </section>
 
     <aside class="panel">

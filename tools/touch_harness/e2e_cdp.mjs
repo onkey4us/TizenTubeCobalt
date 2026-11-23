@@ -350,6 +350,29 @@ try {
   const rep = await ev(`new Promise(r => setTimeout(() => r({ watch: TizenTubeMobile.__watch, rect: TizenTubeMobile.__rect }), 1200))`);
   check('v7 bridge: setWatchPage(true) + setPlayerRect(x,y,w,h,dpr)', rep.watch === true && rep.rect && rep.rect[2] > 0 && rep.rect[3] > 0 && rep.rect[4] > 0, JSON.stringify(rep));
 
+  // ------------------------------------------------------------- v7b checks
+  await send('Emulation.setDeviceMetricsOverride', { width: 507, height: 480, deviceScaleFactor: 1.5, mobile: true }); await sleep(1200);
+  await ev(`TTM.setSetting('quality', 'auto')`); await sleep(600);
+  const qPane = await ev(`({ mode: TTM.layout.mode, range: window.__harnessQuality.range })`);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 480, deviceScaleFactor: 1.5, mobile: true }); await sleep(1200);
+  // Earlier checks pressed Back to leave fill (opt-out for this video); start a fresh one.
+  await ev(`(() => { TTM.layout.state.optedOut = false; const v = document.querySelector('#movie_player video'); v.pause(); return v.play().catch(()=>{}); })()`); await sleep(1500);
+  const qWide = await ev(`({ mode: TTM.layout.mode, range: window.__harnessQuality.range })`);
+  // 507×480@1.5: player ≈ 285 CSS px → 428 physical → 480p; 1280×480@1.5 fill: 720 physical → 720p (cap 1080).
+  check('v7b quality auto: pane → large (480p, cap 720), wide fill → hd720 (cap 1080)', JSON.stringify(qPane.range) === '["large","large"]' && qWide.mode === 'fill' && JSON.stringify(qWide.range) === '["hd720","hd720"]', JSON.stringify({ qPane, qWide }));
+  await ev(`TTM.setSetting('quality', '480')`); await sleep(300);
+  check('v7b quality 480p fixed → large..large', (await ev(`JSON.stringify(window.__harnessQuality.range)`)) === '["large","large"]');
+  await ev(`TTM.setSetting('quality', 'auto')`);
+  await send('Emulation.setDeviceMetricsOverride', { width: 915, height: 412, deviceScaleFactor: 2.6, mobile: true }); await sleep(900);
+  const lazy = await ev(`(() => { const imgs = [...document.querySelectorAll('img')]; return { n: imgs.length, lazy: imgs.filter(i => i.loading === 'lazy' && i.decoding === 'async').length }; })()`);
+  check('v7b all <img> loading=lazy decoding=async', lazy.n > 0 && lazy.n === lazy.lazy, JSON.stringify(lazy));
+  const rel = await ev(`(() => { const items = [...document.querySelectorAll('#mock-related ytm-video-with-context-renderer')]; const vis = items.filter(e => getComputedStyle(e).display !== 'none').length;
+    const more = document.querySelector('#mock-related .ttm-more'); const cont = getComputedStyle(document.querySelector('#mock-related ytm-continuation-item-renderer')).display;
+    return { total: items.length, visible: vis, more: !!more && getComputedStyle(more).display !== 'none', moreH: more && more.getBoundingClientRect().height, cont }; })()`);
+  check('v7b related list capped at 8, continuation hidden, "Xem thêm" ≥48px', rel.visible === 8 && rel.more && rel.moreH >= 48 && rel.cont === 'none', JSON.stringify(rel));
+  await ev(`document.querySelector('#mock-related .ttm-more').click()`); await sleep(300);
+  check('v7b "Xem thêm" shows all items', (await ev(`[...document.querySelectorAll('#mock-related ytm-video-with-context-renderer')].filter(e => getComputedStyle(e).display !== 'none').length`)) === 12);
+
   const errs = consoleMsgs.filter(m => /EXCEPTION|^error/.test(m) && !/JSDelivr/.test(m));
   check('no JS exceptions / console errors', errs.length === 0, errs.join(' | '));
 } catch (e) {

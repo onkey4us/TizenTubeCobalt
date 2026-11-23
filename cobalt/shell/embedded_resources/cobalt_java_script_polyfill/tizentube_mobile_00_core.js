@@ -76,9 +76,13 @@
     // Mirrored to Java (SharedPreferences) through window.TizenTubeMobile.
     onLeave: 'audio',
     // v7 codec gate (module 07): 'auto' = reject AV1, >1080p, >60 fps; 'h264' = also VP9/VP8.
-    codec: 'auto'
+    codec: 'auto',
+    // v7b quality cap (module 22): 'auto' = 480p target / 720p cap in the normal layout,
+    // up to 1080p in wide fill / fullscreen; or a fixed cap.
+    quality: 'auto'
   };
-  var ENUMS = { videoFit: ['fit', 'fill'], onLeave: ['audio', 'pip', 'stop'], codec: ['auto', 'h264'] };
+  var ENUMS = { videoFit: ['fit', 'fill'], onLeave: ['audio', 'pip', 'stop'], codec: ['auto', 'h264'],
+    quality: ['auto', '480', '720', '1080'] };
 
   /** Vietnamese UI strings. */
   var STRINGS = {
@@ -94,6 +98,9 @@
     videoFitOptions: { fit: 'Vừa khung', fill: 'Phủ kín' },
     onLeave: 'Khi chuyển app',
     onLeaveOptions: { audio: 'Chỉ phát âm thanh', pip: 'Cửa sổ nổi (PiP)', stop: 'Dừng phát' },
+    quality: 'Chất lượng',
+    qualityOptions: { auto: 'Tự động', '480': '480p', '720': '720p', '1080': '1080p' },
+    qualityNote: 'Tự động: 480p trong khung nhỏ (tối đa 720p), tới 1080p khi toàn màn hình.',
     codec: 'Codec',
     codecOptions: { auto: 'Tự động (chặn AV1)', h264: 'Ưu tiên H.264' },
     codecNote: 'Đổi codec có hiệu lực từ video tiếp theo.',

@@ -82,7 +82,8 @@ cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
   tizentube_mobile_30_settings.js  mục "Cài đặt TizenTube" trong menu tài khoản + bảng cài đặt
   tizentube_mobile_05_visibility.js giả visibility/focus khi "Khi chuyển app" ≠ Dừng phát (v6)
   tizentube_mobile_07_codec.js     chặn AV1, >1080p, >60 fps; VP9 chỉ khi có giải mã cứng (v7)
-  tizentube_mobile_08_light.js     tắt xem trước trong feed, tắt hiệu ứng/bóng/glow (v7)
+  tizentube_mobile_08_light.js     tắt xem trước trong feed, tắt hiệu ứng/bóng/glow, ảnh lazy, danh sách liên quan ≤ 8 (v7/v7b)
+  tizentube_mobile_22_quality.js   "Chất lượng": giới hạn độ phân giải qua API player (v7b)
   tizentube_mobile_40_background.js báo Java video có đang phát (v6; thay module vuốt dọc cũ)
 ```
 
@@ -651,6 +652,28 @@ nền: callback MediaSession ở trên (session giữ active khi phát nền, v6
 * **DPAD** (trang xem, không có ô nhập đang focus — `ImeAdapterImpl.focusedNodeEditable()`): TRÁI/PHẢI
   = −10/+10 s khi lớp phủ ẩn (khi hiện thì để di chuyển focus giữa các nút), GIỮA/ENTER = phát/tạm dừng
   (hoặc bấm nút đang focus), LÊN/XUỐNG = hiện lớp phủ. Phím đã xử lý thì `onKeyUp` cũng bị nuốt.
+
+## 4d. v7b: chất lượng video, ảnh nhẹ hơn
+
+**"Chất lượng"** (bảng cài đặt): Tự động (mặc định) / 480p / 720p / 1080p.
+* Dùng API player của m.youtube.com, đã kiểm trên trang thật: `movie_player.setPlaybackQualityRange(q, q)`
+  với tên YouTube (`small` 240, `medium` 360, `large` 480, `hd720`, `hd1080`); `videoHeight` đổi theo
+  trong vài giây. `setPlaybackQuality()` một mình **không** có tác dụng trên mweb. Khoảng `[480, 720]`
+  để ABR tự chọn thì YouTube nhảy thẳng lên 720p, nên ta **ghim** đúng một mức.
+* **Tự động**: bố cục thường (ô giữa của xe, không phủ kín): **480p**, chỉ lên 720p khi trình phát cao
+  hơn ~600 px vật lý (tối đa 720p). Phủ kín màn rộng / toàn màn hình: 720p, lên 1080p khi trình phát cao
+  hơn ~900 px vật lý (tối đa 1080p). Mức chọn = mức chuẩn nhỏ nhất ≥ ~0,9 × chiều cao vật lý trình phát.
+* Mức cố định = mục tiêu và trần. Áp lại khi có video mới (`loadedmetadata`), `resize` (chia màn / đổi ô),
+  vào/ra phủ kín hoặc toàn màn hình, đổi cài đặt, và kiểm 3 s một lần (YouTube có thể đặt lại khi dựng
+  lại player). Lọc codec (module 07) vẫn chặn cứng > 1080p / > 60 fps; YouTube chỉ dò MediaSource một
+  lần lúc đầu, nên giới hạn động đi qua API player.
+
+**Ảnh thu nhỏ**: mọi `<img>` (cả ảnh YouTube thêm sau, 1 MutationObserver) có `loading="lazy"` và
+`decoding="async"`; `<link rel=preload|prefetch>` ảnh bị bỏ. (Trang hiện chỉ preload script player và
+các ping `generate_204` để làm nóng kết nối — không phải ảnh, nên giữ.) **Danh sách liên quan** ở trang
+xem: hiện **8** mục đầu, ẩn phần còn lại và mục tải tiếp (`ytm-continuation-item-renderer`), thêm hàng
+**"Xem thêm"** (≥ 48 px) để hiện hết; sau đó tải tiếp của YouTube chạy như thường khi cuộn tới. Mỗi
+video mới quay lại giới hạn 8.
 
 ## 12. Kết quả kiểm tra (không build toàn bộ)
 
