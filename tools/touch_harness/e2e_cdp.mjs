@@ -44,7 +44,7 @@ try {
   await send('Page.navigate', { url: 'http://127.0.0.1:8765/tools/touch_harness/index.html' });
   await sleep(2500);
 
-  check('userscript initialised (window.TTM)', await ev('!!(window.TTM && TTM.adblock && TTM.player && TTM.settingsUi && TTM.gestures)'));
+  check('userscript initialised (window.TTM)', await ev('!!(window.TTM && TTM.adblock && TTM.player && TTM.settingsUi && TTM.layout && TTM.visibility && TTM.background && !TTM.gestures)'));
   check('Trusted Types enforced like m.youtube.com', await ev(`(() => { try { document.createElement('div').innerHTML = '<b>x</b>'; return false; } catch (e) { return e instanceof TypeError; } })()`));
   check('modules loaded from repo path', (await ev('window.__harnessModuleBase')) === '../../cobalt/shell/embedded_resources/cobalt_java_script_polyfill/');
   check('ad CSS hides feed/overlay ads', await ev(`['ytm-promoted-sparkles-web-renderer','ad-slot-renderer','ytm-companion-ad-renderer','.ytp-ad-overlay-container']
@@ -106,39 +106,25 @@ try {
   await sleep(800);
   check('video unmuted after ad', !(await ev(`document.querySelector('#movie_player video').muted`)));
 
-  // Gestures: vertical swipe right half = volume via bridge.
+  // ------------------------------------------------ v6: no vertical swipes
   const pr = await ev(`(() => { const r = document.getElementById('movie_player').getBoundingClientRect(); return {l:r.left,t:r.top,w:r.width,h:r.height}; })()`);
-  const vol0 = await ev(`TizenTubeMobile.getVolume()`);
+  const vol0 = await ev(`TizenTubeMobile.getVolume()`), bri0 = await ev(`TizenTubeMobile.getBrightness()`);
   let x = pr.l + pr.w * 0.75, y0 = pr.t + pr.h * 0.55;
-  await ev(`window.__nativeLogCount = document.querySelectorAll('#log div').length`);
   await touch('touchStart', x, y0);
   for (let i = 1; i <= 10; i++) { await touch('touchMove', x, y0 - i * 8); await sleep(16); }
-  const indShown = await ev(`(() => { const e = document.getElementById('ttm-level'); if (!e) return null; const r = e.getBoundingClientRect();
-     return {show: e.classList.contains('ttm-show'), cx: r.left + r.width/2, cy: r.top + r.height/2, w: innerWidth, h: innerHeight, icon: e.getAttribute('data-icon')}; })()`);
-  await touch('touchEnd');
-  await sleep(100);
-  const vol1 = await ev(`TizenTubeMobile.getVolume()`);
-  check('right-half swipe up raises volume (bridge)', vol1 > vol0, `${vol0.toFixed(2)} → ${vol1.toFixed(2)}`);
-  check('level indicator shown in centre', indShown && indShown.show && Math.abs(indShown.cx - indShown.w / 2) < 5 && Math.abs(indShown.cy - indShown.h / 2) < 5 && indShown.icon === 'volume', JSON.stringify(indShown));
-  const logs = await ev(`[...document.querySelectorAll('#log div')].slice(window.__nativeLogCount).map(d => d.textContent).join('\\n')`);
-  check('swipe not seen as native tap/swipe', !/native/.test(logs), logs.split('\n').filter(l => /native/.test(l)).join(' | '));
-  await sleep(900);
-  check('indicator hides after gesture', await ev(`!document.getElementById('ttm-level').classList.contains('ttm-show')`));
-
-  // Left half = brightness down.
-  const b0 = await ev(`TizenTubeMobile.getBrightness()`);
-  x = pr.l + pr.w * 0.25; y0 = pr.t + pr.h * 0.3;
+  await touch('touchEnd'); await sleep(200);
+  x = pr.l + pr.w * 0.25;
   await touch('touchStart', x, y0);
-  for (let i = 1; i <= 10; i++) { await touch('touchMove', x, y0 + i * 8); await sleep(16); }
-  await touch('touchEnd');
-  await sleep(100);
-  const b1 = await ev(`TizenTubeMobile.getBrightness()`);
-  check('left-half swipe down lowers brightness (bridge)', b1 < b0, `${b0.toFixed(2)} → ${b1.toFixed(2)}`);
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', x, y0 - i * 8); await sleep(16); }
+  await touch('touchEnd'); await sleep(200);
+  check('v6: no volume/brightness swipe (bridge untouched, no level HUD)',
+    (await ev(`TizenTubeMobile.getVolume()`)) === vol0 && (await ev(`TizenTubeMobile.getBrightness()`)) === bri0 &&
+    (await ev(`!document.getElementById('ttm-level') && !window.TTM.gestures`)));
 
-  // Tap and double-tap still reach the "native" player handler.
+  // Tap and double-tap still reach the "native" player handler (also near the edges:
+  // the 32 px edge exclusion is gone and nothing of ours listens to 1-finger touches).
   await ev(`window.__nativeLogCount = document.querySelectorAll('#log div').length`);
   const tx = pr.l + pr.w * 0.8, ty = pr.t + pr.h * 0.5;
-  const tBefore = await ev(`document.querySelector('#movie_player video').currentTime`);
   await touch('touchStart', tx, ty); await touch('touchEnd'); await sleep(80);
   await touch('touchStart', tx, ty); await touch('touchEnd'); await sleep(400);
   const logs2 = await ev(`[...document.querySelectorAll('#log div')].slice(window.__nativeLogCount).map(d => d.textContent).join('\\n')`);
@@ -146,22 +132,69 @@ try {
   await touch('touchStart', tx, ty); await touch('touchEnd'); await sleep(500);
   const logs3 = await ev(`[...document.querySelectorAll('#log div')].slice(window.__nativeLogCount).map(d => d.textContent).join('\\n')`);
   check('native single tap still toggles controls', /native tap: toggle controls/.test(logs3));
-  // Short vertical move below threshold is not claimed.
-  const vB = await ev(`TizenTubeMobile.getVolume()`);
-  await touch('touchStart', tx, ty); await touch('touchMove', tx, ty - 15); await touch('touchEnd'); await sleep(100);
-  check('short move (<24px) ignored', (await ev(`TizenTubeMobile.getVolume()`)) === vB);
-  // Horizontal swipe not claimed.
-  await touch('touchStart', tx - 100, ty); for (let i = 1; i <= 8; i++) await touch('touchMove', tx - 100 + i * 15, ty + i * 2); await touch('touchEnd'); await sleep(100);
-  check('horizontal swipe ignored', (await ev(`TizenTubeMobile.getVolume()`)) === vB);
+  await ev(`window.__nativeLogCount = document.querySelectorAll('#log div').length`);
+  const ex = pr.l + 10;  // inside the old 32 px edge strip
+  await sleep(500);
+  await touch('touchStart', ex, ty); await touch('touchEnd'); await sleep(80);
+  await touch('touchStart', ex, ty); await touch('touchEnd'); await sleep(400);
+  const logsE = await ev(`[...document.querySelectorAll('#log div')].slice(window.__nativeLogCount).map(d => d.textContent).join('\\n')`);
+  check('double-tap at the left edge (old exclusion strip) reaches the page', /native double-tap seek -10s/.test(logsE), logsE.split('\n').filter(l => /native/.test(l)).join(' | '));
 
-  // Fallback without bridge: video.volume.
-  await ev(`(() => { const c = document.getElementById('opt-bridge'); c.checked = false; c.dispatchEvent(new Event('change')); })()`);
-  await ev(`document.querySelector('#movie_player video').volume = 0.3`);
-  x = pr.l + pr.w * 0.75; y0 = pr.t + pr.h * 0.55;
-  await touch('touchStart', x, y0);
-  for (let i = 1; i <= 8; i++) { await touch('touchMove', x, y0 - i * 10); await sleep(16); }
-  await touch('touchEnd'); await sleep(100);
-  check('fallback: video.volume changes without bridge', (await ev(`document.querySelector('#movie_player video').volume`)) > 0.3);
+  // -------------------------------------------- v6: pinch toggles fit/fill
+  async function pinch(cx, cy, d0, d1) {
+    const pts = d => [{ x: cx - d / 2, y: cy, id: 1 }, { x: cx + d / 2, y: cy, id: 2 }];
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(d0) });
+    for (let i = 1; i <= 8; i++) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(d0 + (d1 - d0) * i / 8) }); await sleep(16); }
+    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await sleep(150);
+  }
+  const fitInfo = () => ev(`(() => { const v = document.querySelector('#movie_player video'); const t = document.getElementById('ttm-mode-toast');
+    return { fit: TTM.layout.fit, objectFit: getComputedStyle(v).objectFit, toast: t && t.classList.contains('ttm-show') ? t.textContent : null }; })()`);
+  const f0 = await fitInfo();
+  check('v6: default video framing is fit (object-fit: contain)', f0.fit === 'fit' && f0.objectFit === 'contain', JSON.stringify(f0));
+  const pcx = pr.l + pr.w / 2, pcy = pr.t + pr.h / 2;
+  await pinch(pcx, pcy, 80, 220);
+  const f1 = await fitInfo();
+  check('v6: pinch out → Phủ kín (cover) + toast', f1.fit === 'fill' && f1.objectFit === 'cover' && f1.toast === 'Phủ kín', JSON.stringify(f1));
+  await sleep(1300);
+  await pinch(pcx, pcy, 220, 80);
+  const f2 = await fitInfo();
+  check('v6: pinch in → Vừa khung (contain) + toast', f2.fit === 'fit' && f2.objectFit === 'contain' && f2.toast === 'Vừa khung', JSON.stringify(f2));
+  await ev(`window.__nativeLogCount = document.querySelectorAll('#log div').length`);
+  await sleep(1300);
+  await touch('touchStart', tx, ty); await touch('touchEnd'); await sleep(80);
+  await touch('touchStart', tx, ty); await touch('touchEnd'); await sleep(400);
+  const logsP = await ev(`[...document.querySelectorAll('#log div')].slice(window.__nativeLogCount).map(d => d.textContent).join('\\n')`);
+  check('double-tap seek still works after pinches', /native double-tap seek \+10s/.test(logsP));
+
+  // ------------------------------------------ v6: visibility / focus spoof
+  const vis = await ev(`(() => { let seen = 0; const f = () => seen++;
+    document.addEventListener('visibilitychange', f); window.addEventListener('blur', f); window.addEventListener('pagehide', f);
+    document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('blur')); window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    const r = { mode: TTM.settings.onLeave, hidden: document.hidden, state: document.visibilityState, hasFocus: document.hasFocus(), seen };
+    document.removeEventListener('visibilitychange', f); window.removeEventListener('blur', f); window.removeEventListener('pagehide', f); return r; })()`);
+  check('v6 audio mode: hidden=false, visible, hasFocus, page listeners blocked', vis.mode === 'audio' && vis.hidden === false &&
+    vis.state === 'visible' && vis.hasFocus === true && vis.seen === 0, JSON.stringify(vis));
+  const inputFocus = await ev(`(() => { const i = document.getElementById('search-input'); document.getElementById('search-bar').hidden = false;
+    let n = 0; i.addEventListener('blur', () => n++, { once: true }); i.focus(); i.blur(); document.getElementById('search-bar').hidden = true; return n; })()`);
+  check('element blur (inputs) still reaches the page', inputFocus === 1);
+  await ev(`TTM.setSetting('onLeave', 'stop')`);
+  const vis2 = await ev(`(() => { let seen = 0; const f = () => seen++; document.addEventListener('visibilitychange', f);
+    document.dispatchEvent(new Event('visibilitychange')); document.removeEventListener('visibilitychange', f); return { seen, bridgeMode: TizenTubeMobile.getLeaveMode() }; })()`);
+  check('v6 Dừng phát: no spoof (event reaches page); mode pushed to Java bridge', vis2.seen === 1 && vis2.bridgeMode === 'stop', JSON.stringify(vis2));
+  await ev(`TTM.setSetting('onLeave', 'audio')`);
+  check('playing state reported to Java bridge', (await ev(`(document.querySelector('#movie_player video').play().catch(()=>{}), new Promise(r => setTimeout(() => r(TizenTubeMobile.__playing), 1300)))`)) === true);
+
+  // ---------------------------------------------------- v6: PiP from Java
+  await ev(`TTM.player.showSkipToast({ category: 'sponsor' }, function () {})`);
+  await ev(`(function(on){document.documentElement.classList.toggle('ttm-pip',on);window.dispatchEvent(new CustomEvent('tizentube-pip',{detail:{active:on}}));})(true)`);
+  await sleep(300);
+  const pip = await ev(`(() => { const d = s => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : 'absent'; };
+    return { mode: TTM.layout.mode, toast: d('#ttm-skip-toast'), header: d('#header-bar'), pcc: d('#player-control-container'), entry: d('[data-ttm-entry]') }; })()`);
+  check('v6 PiP: only video (fill), TizenTube overlays and header hidden', pip.mode === 'fill' && pip.toast === 'none' && pip.header === 'none', JSON.stringify(pip));
+  await ev(`(function(on){document.documentElement.classList.toggle('ttm-pip',on);window.dispatchEvent(new CustomEvent('tizentube-pip',{detail:{active:on}}));})(false)`);
+  await sleep(300);
+  check('v6 PiP exit restores previous layout', (await ev(`!document.documentElement.classList.contains('ttm-pip') && getComputedStyle(document.getElementById('ttm-skip-toast')).display !== 'none'`)));
 
   // Account menu entry + settings sheet + Back closes sheet.
   await ev(`document.getElementById('avatar-btn').click()`);
@@ -175,7 +208,7 @@ try {
   await sleep(200);
   check('settings sheet opens', await ev(`!!document.getElementById('ttm-sheet')`));
   const sheetText = await ev(`document.getElementById('ttm-sheet').innerText`);
-  check('sheet has Vietnamese toggles', ['Chặn quảng cáo', 'SponsorBlock', 'Tốc độ phát mặc định', 'Tài trợ'].every(s => sheetText.includes(s)));
+  check('sheet has Vietnamese toggles', ['Chặn quảng cáo', 'SponsorBlock', 'Tốc độ phát mặc định', 'Tài trợ', 'Khung video', 'Vừa khung', 'Phủ kín', 'Khi chuyển app', 'Chỉ phát âm thanh', 'Cửa sổ nổi (PiP)', 'Dừng phát'].every(s => sheetText.includes(s)));
   // Toggle adblock off via sheet → CSS removed.
   await ev(`document.querySelector('#ttm-sheet label input').click()`);
   await sleep(100);
@@ -215,9 +248,17 @@ try {
       header: getComputedStyle(document.getElementById('header-bar')).display, r: [r.left, r.top, r.width, r.height],
       v: [v.left, v.top, v.width, v.height], fit: getComputedStyle(document.querySelector('#movie_player video')).objectFit,
       vw: innerWidth, vh: innerHeight }; })()`);
-  check('landscape auto-fill: player covers viewport, header hidden',
+  check('wide (915×412, 2.22:1) auto-fill: player covers viewport, header hidden, video contain',
     (fill.mode === 'fill' || fill.mode === 'real') && fill.cls && fill.header === 'none' && fill.r[0] === 0 && fill.r[1] === 0 &&
-    fill.r[2] === fill.vw && fill.r[3] === fill.vh && fill.v[2] === fill.vw && fill.v[3] === fill.vh && fill.fit === 'cover', JSON.stringify(fill));
+    fill.r[2] === fill.vw && fill.r[3] === fill.vh && fill.v[2] === fill.vw && fill.v[3] === fill.vh && fill.fit === 'contain', JSON.stringify(fill));
+  // Aspect gate: resize to a near-square car pane, then wide again, in one page session.
+  const modeAt = async (w, h) => { await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1.5, mobile: true }); await sleep(900); return ev(`TTM.layout.mode + ' ' + TTM.layout.aspect().toFixed(2)`); };
+  const mPane = await modeAt(507, 480), mWide = await modeAt(1280, 480), mPane2 = await modeAt(600, 480);
+  check('aspect gate: pane 507×480 → normal layout, 1280×480 → fill, 600×480 → normal (no reload)',
+    mPane.startsWith('off') && mWide.startsWith('fill') && mPane2.startsWith('off') && (await ev(`!!window.TTM`)), [mPane, mWide, mPane2].join(' | '));
+  const mBorder = await modeAt(760, 480);  // 1.58: inside the hysteresis band, stays off
+  check('aspect hysteresis: 760×480 (1.58) stays normal after a narrow pane', mBorder.startsWith('off'), mBorder);
+  await send('Emulation.setDeviceMetricsOverride', { width: 915, height: 412, deviceScaleFactor: 2.6, mobile: true }); await sleep(900);
   // Toast contrast: compute WCAG ratio over a white backdrop (worst case).
   await ev(`TTM.player.showSkipToast({ category: 'sponsor' }, function () {})`);
   // v5: no fade-in, the toast is fully opaque in the same frame it is shown.
@@ -248,6 +289,10 @@ try {
     sh.h <= sh.vh * 0.851 && sh.top >= 0 && sh.bottom <= sh.vh && sh.scrollable && sh.x[0] >= 48 && sh.x[1] >= 48 && sh.x[2] <= 0 && sh.x[2] > -16 && sh.x[3] < 16 && sh.hasIntro, JSON.stringify(sh));
   // Touch-drag inside the sheet body scrolls it and is not taken as a volume swipe.
   const vBefore = await ev(`TizenTubeMobile.getVolume()`);
+  const infoLine = await ev(`(() => { const i = document.querySelector('#ttm-sheet .ttm-info'); return i && i.textContent; })()`);
+  check('v6: sheet info line "DPR … · màn …×… · khung …×…"', /^DPR [\d.]+ · màn \d+×\d+ · khung \d+×\d+$/.test(infoLine || ''), infoLine);
+  const radios = await ev(`[...document.querySelectorAll('#ttm-sheet fieldset[data-ttm-setting=onLeave] input')].map(i => i.value + (i.checked ? '*' : ''))`);
+  check('v6: "Khi chuyển app" has 3 options, Chỉ phát âm thanh checked', JSON.stringify(radios) === JSON.stringify(['audio*', 'pip', 'stop']), JSON.stringify(radios));
   const bb = await ev(`(() => { const r = document.querySelector('#ttm-sheet .ttm-body').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * 0.75, r.top + r.height * 0.2]; })()`);
   // Raw touch drag (Input.synthesizeScrollGesture is a no-op in headless).
   await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb[0], y: bb[1] }] });

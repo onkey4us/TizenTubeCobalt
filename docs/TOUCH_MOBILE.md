@@ -3,7 +3,7 @@
 Nhánh `touch-mobile`. Bản này biến APK TizenTube Cobalt thành ứng dụng cho **điện thoại** (chỉ màn
 ngang): tải giao diện YouTube dành cho điện thoại `https://m.youtube.com` thay vì giao diện TV
 `youtube.com/tv`, và tự mang theo một userscript TizenTube viết riêng cho trang mobile (chặn quảng
-cáo, SponsorBlock, tốc độ phát, cử chỉ độ sáng/âm lượng). Không còn lớp giả lập D‑pad, không có
+cáo, SponsorBlock, tốc độ phát, phát nền / PiP, vừa khung / phủ kín). Không còn lớp giả lập D‑pad, không có
 thanh nút nổi.
 
 > Phương án cũ (giữ giao diện TV + giả lập phím mũi tên bằng cử chỉ) đã bị huỷ và **không** có
@@ -16,7 +16,7 @@ thanh nút nổi.
 | URL khởi động | `cobalt.APP_URL = https://m.youtube.com/` | Giao diện điện thoại vốn đã hỗ trợ cảm ứng, bàn phím ảo, chạm đúp tua. |
 | User agent | UA Chrome Android dạng *Mobile* + client hints `mobile=?1` | Không có UA mobile thì YouTube trả bản desktop hoặc bản TV. |
 | Tỉ lệ hiển thị | Bỏ `--force-device-scale-factor=1` khi chạy chế độ mobile | Giao diện TV cố định 1920×1080 ở tỉ lệ 1; m.youtube.com cần mật độ điểm ảnh thật của máy, nếu không chữ và nút rất nhỏ. Vì vậy **không** cần phóng 1,25–1,5×: trang mobile tự co giãn theo viewport. |
-| Xoay màn hình | `android:screenOrientation="sensorLandscape"` | Chỉ màn ngang (2 chiều ngang). |
+| Xoay / chia màn | v6: **không khoá hướng**, `resizeableActivity="true"` | Màn xe 1920×720 chạy app trong ô chia 3 (ô giữa gần vuông); đổi kích thước không tạo lại Activity. |
 | Toàn màn hình | Immersive (ẩn thanh trạng thái + thanh điều hướng, vuốt từ mép để hiện tạm) | Theo wireframe. |
 | Nút Back | Back = `history.back()` của trang; ở trang gốc thì đưa app xuống nền | Hành vi trình duyệt, thay cho phím Escape của TV. |
 | Bàn phím ảo | Sửa đường IME để bàn phím Android gõ được vào `<input>` | Cobalt TV không bao giờ cần, nên đường này chưa từng được nối. |
@@ -36,7 +36,8 @@ tizentube_mobile_ui = false   # quay lại youtube.com/tv như bản gốc
 
 1. `cobalt/android/BUILD.gn:26` truyền `tizentube_mobile_ui=$tizentube_mobile_ui` vào template manifest.
 2. `cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2:3,74-87`: khi bật, sinh
-   `sensorLandscape`, `APP_URL=https://m.youtube.com/`, meta-data `tizentube.MOBILE_UI=true`, tắt splash.
+   `resizeableActivity`, `APP_URL=https://m.youtube.com/`, meta-data `tizentube.MOBILE_UI=true`, tắt splash,
+   dịch vụ `dev.cobalt.media.MediaPlaybackService` (`foregroundServiceType="mediaPlayback"`).
 3. `CobaltActivity.isTizenTubeMobileUi()` (`cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java:234`)
    đọc meta-data đó, thêm switch `--tizentube-mobile-ui` và `use-mobile-user-agent` vào command line.
 4. Native: `switches::kTizenTubeMobileUI` (`cobalt/browser/switches.h:46`) bật UA mobile.
@@ -79,7 +80,8 @@ cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
   tizentube_mobile_20_player.js    SponsorBlock + thông báo "Hoàn tác", tốc độ phát mặc định
   tizentube_mobile_25_layout.js    màn ngang tự phủ kín màn hình, ẩn "Mở ứng dụng"
   tizentube_mobile_30_settings.js  mục "Cài đặt TizenTube" trong menu tài khoản + bảng cài đặt
-  tizentube_mobile_40_gestures.js  vuốt dọc: độ sáng (trái) / âm lượng (phải)
+  tizentube_mobile_05_visibility.js giả visibility/focus khi "Khi chuyển app" ≠ Dừng phát (v6)
+  tizentube_mobile_40_background.js báo Java video có đang phát (v6; thay module vuốt dọc cũ)
 ```
 
 * Thứ tự chạy là thứ tự tên file (bản đồ `std::map` trong `generate_data_header.py`), nên có tiền tố số.
@@ -158,29 +160,31 @@ Tốc độ mặc định (0,25× đến 3×) được áp dụng cho mỗi vide
 pha capture trên `document`), áp lại sau 800 ms vì player có thể đặt lại. Người dùng vẫn đổi tốc độ
 trong menu của YouTube như bình thường cho video đang xem.
 
-### 3.3b Bố cục màn ngang và "Mở ứng dụng" (`25_layout`)
+### 3.3b Bố cục, khung video, PiP và "Mở ứng dụng" (`25_layout`)
 
-* **Tự phủ kín màn hình khi xem ở màn ngang.** Khi video trên trang xem bắt đầu phát
-  (`playing`) và màn hình đang ngang, `<html>` được gắn lớp `ttm-fill`: thanh đầu YouTube bị ẩn,
-  `#player-container-id` ghim kín viewport, `<video>` phủ kín với `object-fit: cover`, nên không còn
-  viền đen hai bên trên màn 20:9 (mép trên/dưới video bị cắt một chút). Tắt "Phủ kín màn hình (cắt
-  bớt mép video)" để dùng `contain` (có viền đen, không cắt). Tắt "Tự động toàn màn hình khi xem"
-  để tắt hẳn. Back lần 1 thoát chế độ này (giữ trang xem), Back lần 2 mới `history.back()`.
-  Mở bài khác thì tự bật lại.
+* **Tự phủ kín theo tỉ lệ cửa sổ (v6).** Chỉ khi `innerWidth/innerHeight > 1,6` (rộng hơn 16:10, ví
+  dụ toàn màn 1280×480) và video trên trang xem đang phát, `<html>` mới được gắn `ttm-fill`: thanh đầu
+  ẩn, `#player-container-id` ghim kín cửa sổ. Ở ô giữa gần vuông của màn chia 3 (427–900 px rộng,
+  tỉ lệ 0,9–1,3) giữ **bố cục xem bình thường** của m.youtube.com (video trên, tiêu đề và danh sách
+  liên quan dưới). Tính lại khi `resize`/`orientationchange` (chờ 250 ms, ngưỡng trễ vào 1,6 / ra 1,5
+  để không nhấp nháy), không tải lại trang. Chụm hai ngón (xem dưới) vẫn vào phủ kín bằng tay.
+* **Khung video (v6).** Mặc định **Vừa khung** = `object-fit: contain` (thấy trọn khung, có viền đen),
+  ở cả bố cục thường lẫn phủ kín. **Phủ kín** = `cover` (cắt mép). Cài đặt "Khung video"; **chụm hai
+  ngón** trên video đổi qua lại: kéo ra → Phủ kín, chụm vào → Vừa khung, kèm thông báo ngắn giữa màn.
+  Chỉ xét chạm **2 ngón**, nên chạm 1 lần và chạm đúp ±10 s của YouTube không bị ảnh hưởng. Mỗi video
+  mới quay về mặc định.
+* **PiP.** `CobaltActivity.onPictureInPictureModeChanged()` gắn `<html>.ttm-pip` và phát sự kiện
+  `tizentube-pip`; module hiện **chỉ video** (phủ kín, ẩn thanh đầu, điều khiển YouTube, toast, bảng
+  cài đặt) và trả lại như cũ khi thoát PiP.
 * **Vì sao không dùng Fullscreen API.** Đã thử trên m.youtube.com thật: mọi kiểu toàn màn hình
   "thật" (`requestFullscreen` trên container hoặc `<html>`) và cả `body[faux-fullscreen]` của
   YouTube đều khiến YouTube kéo `#player-control-container` phủ lên video, và **chạm đúp ±10 s gốc
-  ngừng hoạt động**. Lớp phủ CSS giữ nguyên bố cục đó nên chạm đúp vẫn chạy. Thanh trạng thái/điều
-  hướng Android đã do app ẩn (immersive), nên hình ảnh như nhau. Hằng `USE_FULLSCREEN_API` (mặc định
-  `false`) giữ lại đường API để thử sau.
-* Chỉ ghim container ngoài cùng. `#player` / `#movie_player` vẫn theo luồng bình thường; nếu đặt
-  `#player` là `absolute`, khối điều khiển (nơi YouTube bắt chạm đúp) bị kéo lên trên và hỏng chạm đúp.
-* **Ẩn "Mở ứng dụng".** Trong thanh đầu m.youtube.com (khi chưa đăng nhập) nút này là
-  `<a>` trong `ytm-button-renderer.icon-avatar_logged_out` (`ytm-mobile-topbar-renderer#header-bar`).
-  Module tìm theo **chữ** ("Mở ứng dụng", "Open App", …) hoặc link `intent:`/`vnd.youtube:`/Play Store
-  trong thanh đầu và các khối quảng bá app (`ytm-mealbar-promo-renderer`, …), rồi gắn lớp
-  `ttm-app-promo` (`display:none`). Không ẩn cả thanh đầu, nên Tìm kiếm và ảnh đại diện (khi đã
-  đăng nhập) vẫn còn. Luôn bật vì trong app nút này vô dụng.
+  ngừng hoạt động**. Lớp phủ CSS giữ nguyên bố cục đó nên chạm đúp vẫn chạy. Hằng
+  `USE_FULLSCREEN_API` (mặc định `false`) giữ lại đường API để thử sau.
+* Chỉ ghim container ngoài cùng. `#player` / `#movie_player` vẫn theo luồng bình thường.
+* **Ẩn "Mở ứng dụng".** Tìm theo **chữ** ("Mở ứng dụng", "Open App", …) hoặc link `intent:`/
+  `vnd.youtube:`/Play Store trong thanh đầu và các khối quảng bá app, gắn lớp `ttm-app-promo`. Không ẩn
+  cả thanh đầu.
 
 ### 3.4 Cài đặt (`30_settings`): không có nút nổi
 
@@ -190,7 +194,10 @@ m.youtube.com (bấm ảnh đại diện). Bấm vào sẽ mở bảng cài đ�
 * Chặn quảng cáo
 * SponsorBlock (tự bỏ qua đoạn) và **từng loại đoạn**
 * Tốc độ phát mặc định
-* Vuốt dọc chỉnh độ sáng / âm lượng
+* Khung video: Vừa khung (mặc định) / Phủ kín
+* Tự động toàn màn hình khi xem (màn rộng)
+* **Khi chuyển app**: Chỉ phát âm thanh (mặc định) / Cửa sổ nổi (PiP) / Dừng phát
+* Dòng thông tin `DPR … · màn …×… · khung …×…` (cập nhật khi đổi kích thước) để biết DPR thật của màn xe
 
 Bảng cài đặt cao tối đa **85vh** (≈350 px trên màn ngang 412 px). Phần đầu (tiêu đề + nút **✕**
 48×48 ở góc trên phải, `aria-label="Đóng"`) cố định, chỉ phần thân cuộn (`overflow-y: auto`), nên mục
@@ -217,45 +224,92 @@ dựa vào class sinh tự động):
 
 Khi YouTube đổi tên thẻ, chỉ cần sửa `ACCOUNT_MENU_SELECTORS` / `FALLBACK_MENU_SELECTORS`.
 
-### 3.5 Cử chỉ trong trình phát (`40_gestures`)
+### 3.5 Không còn vuốt dọc (v6)
 
-* **Vuốt dọc nửa trái** của player = **độ sáng**, **nửa phải** = **âm lượng**. Vuốt hết 80% chiều
-  cao player = 0→100%.
-* Ô chỉ báo nhỏ ở **giữa màn hình** (biểu tượng + thanh + %), ẩn sau 0,7 s khi nhấc tay.
-* **Không** đụng tới cử chỉ của YouTube: không thêm chạm, chạm đúp, play/pause hay tua. Một lần chạm
-  chỉ bị "nhận" khi đã di chuyển ≥ 24px **và** chủ yếu theo chiều dọc (|dy| ≥ 1,5·|dx|). Trước đó
-  YouTube vẫn nhận mọi sự kiện. Vuốt ngang bị bỏ qua. Sau khi nhận, `touchmove`/`touchend` của lần
-  vuốt đó bị chặn (`preventDefault` + `stopImmediatePropagation` ở pha capture) để YouTube không coi
-  là chạm. Chạm đúp tua ±10s và chạm để hiện/ẩn điều khiển của YouTube vẫn hoạt động (harness kiểm tra).
-* Bỏ qua: 32px mép trái/phải (cử chỉ Back của Android), 48px phía trên, 72px phía dưới (thanh tiến
-  trình, nút điều khiển), miniplayer, và phần tử điều khiển (`.ytp-progress-bar`, …).
-* Tắt được trong bảng cài đặt.
+Vuốt dọc chỉnh âm lượng/độ sáng, ô chỉ báo giữa màn và dải loại trừ 32 px ở mép đã **bỏ hẳn**
+(xe có phím âm lượng và độ sáng tự động). Màn video giữ đơn giản: chạm 1 lần hiện điều khiển, chạm đúp
+trái/phải tua 10 s (hành vi gốc của YouTube; không listener nào của TizenTube nghe chạm 1 ngón trên
+player), chụm hai ngón đổi Vừa khung/Phủ kín.
 
-## 4. Cầu nối native
+### 3.6 Giữ trang "đang hiện" (`05_visibility`, v6)
 
-`dev.cobalt.coat.javabridge.TizenTubeMobileBridge`
-(`cobalt/android/apk/app/src/main/java/dev/cobalt/coat/javabridge/TizenTubeMobileBridge.java`)
-được gắn là `window.TizenTubeMobile` qua cơ chế JavaBridge có sẵn của Cobalt
-(`JavascriptInjector.addPossiblyUnsafeInterface`, `CobaltActivity.initializeJavaBridge()`, khoảng dòng
-`:711`). Cầu nối chỉ được thêm khi chạy chế độ mobile, và **chỉ cho các origin**
-`https://m.youtube.com`, `https://www.youtube.com`, `https://youtube.com`
-(`TIZENTUBE_MOBILE_BRIDGE_ORIGINS`, `CobaltActivity.java:101`). Cầu nối HTMLMediaElementExtension
-có sẵn vẫn để allowlist rỗng như cũ.
+Khi "Khi chuyển app" là **Chỉ phát âm thanh** hoặc **Cửa sổ nổi (PiP)**, chạy ở document start trước
+mọi script YouTube:
 
-| Hàm JS | Android | Ghi chú |
+* `document.hidden === false`, `visibilityState === 'visible'` (cả bản `webkit*`), `document.hasFocus()
+  === true` (getter trên `Document.prototype`);
+* chặn ở pha capture trên `window` (listener đầu tiên): `visibilitychange`, `webkitvisibilitychange`,
+  `pagehide` (trừ khi đang rời trang thật, `beforeunload`), `freeze`, `resume`, `blur` **của cửa sổ**
+  (blur của ô nhập/nút vẫn tới trang).
+
+Lý do: trên Android 9 chia màn, chạm vào ô bản đồ làm cửa sổ của ta mất focus (onPause) dù vẫn hiện;
+m.youtube.com dừng video khi mất focus/ẩn. **Dừng phát**: không giả gì (hành vi gốc). Thay đổi trong
+`document.cc` chỉ bỏ userscript jsdelivr trên m.youtube.com, không đụng tới visibility, nên hai bên
+không xung đột.
+
+## 4. Cầu nối native (`window.TizenTubeMobile`, v6)
+
+`dev.cobalt.coat.javabridge.TizenTubeMobileBridge` được gắn qua JavaBridge có sẵn của Cobalt
+(`JavascriptInjector.addPossiblyUnsafeInterface` trong `CobaltActivity.initializeJavaBridge()`), chỉ
+ở chế độ mobile và **chỉ cho origin** `https://m.youtube.com`, `https://www.youtube.com`,
+`https://youtube.com`. Phương thức `@CobaltJavaScriptInterface`:
+
+| Hàm JS | Java | Ghi chú |
 | --- | --- | --- |
-| `getBrightness()` / `setBrightness(0..1)` | `WindowManager.LayoutParams.screenBrightness` | Chỉ cửa sổ của app; không cần quyền `WRITE_SETTINGS`; rời app là trả lại độ sáng hệ thống. Tối thiểu 0,01 để màn không tắt hẳn. |
-| `getVolume()` / `setVolume(0..1)` | `AudioManager` `STREAM_MUSIC` | Cùng luồng với phím âm lượng (`setVolumeControlStream(STREAM_MUSIC)` trong `BaseCobaltActivity`). Không hiện thanh âm lượng hệ thống; ô chỉ báo của ta thay thế. Trả `-1` nếu bị chặn (ví dụ chế độ Không làm phiền). |
-| `getBridgeVersion()` | | `1` |
+| `getBridgeVersion()` | | `2` (v6) |
+| `getLeaveMode()` / `setLeaveMode('audio'\|'pip'\|'stop')` | `SharedPreferences("tizentube_mobile").leave_mode` | Lưu bền; Java đọc **trước khi trang tải** (`readLeaveMode` trong `createContent`) để `onUserLeaveHint`/`onStop` biết chế độ kể cả khi trang chưa chạy. JS gọi `setLeaveMode` mỗi lần lưu cài đặt; lúc khởi động JS lấy giá trị Java làm chuẩn. |
+| `setPlaying(bool)` | `CobaltActivity.onTizenTubePlaybackChanged()` | Module 40 báo `<video>` chính đang phát/dừng; Java gộp với trạng thái MediaSession của Chromium (`CobaltMediaSession.isPlaying()`). |
 
-**Vì sao chọn AudioManager thay vì `video.volume`:** Cobalt phát âm thanh qua Starboard
-(`AudioTrackBridge`). `HTMLMediaElement.volume` có hoạt động nhưng chỉ là hệ số phần mềm, tối đa
-bằng âm lượng hệ thống hiện tại, nên vuốt lên không thể to hơn. `STREAM_MUSIC` đổi đúng âm lượng
-người dùng nghe, giống app YouTube. Nếu không có cầu nối (desktop/harness), userscript dùng
-`video.volume`, và dùng CSS `filter: brightness()` cho độ sáng (chỉ làm tối được), kèm một
-`console.warn`.
+Lời gọi chạy trên luồng nền; thay đổi được chuyển về luồng chính (`Handler`). Hàm âm lượng/độ sáng
+của v5 đã bỏ.
 
-Lời gọi cầu nối là IPC đồng bộ, nên được gom lại tối đa 1 lần mỗi khung hình (`requestAnimationFrame`).
+## 4b. Khi chuyển app: phát nền, PiP, chia màn (v6)
+
+**Chỉ phát âm thanh (mặc định)**, khi `onStop` lúc đang phát:
+
+1. `CobaltActivity.onStop()` quyết định **trước** `super.onStop()`: đặt
+   `CobaltMediaSession.setKeepActiveInBackground(true)` để `StarboardBridge.onActivityStop()` không
+   huỷ MediaSession (thông báo + phím media vẫn chạy).
+2. **Không** gọi `updateShellActivityVisible(false)`: WebContents giữ `VISIBLE`, Blink không phát
+   `visibilitychange`, Chromium không đưa renderer xuống nền. Thêm cờ dòng lệnh (chế độ mobile):
+   `--disable-background-media-suspend` (WebMediaPlayerImpl không treo pipeline khi trang ẩn;
+   Android mặc định `kIsBackgroundMediaSuspendEnabled = true`), `--disable-renderer-backgrounding`,
+   `--disable-background-timer-throttling` (JS SponsorBlock / tự phát tiếp vẫn chạy đúng giờ).
+3. Khởi động `dev.cobalt.media.MediaPlaybackService`: dịch vụ tiền cảnh `mediaPlayback`
+   (`startForegroundService` từ API 26, `startService` dưới đó; `startForeground(id, n,
+   FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)` từ API 29). Kênh thông báo "Đang phát" (API 26+),
+   `Notification.MediaStyle` gắn token MediaSession framework (`MediaSessionCompat.Token.getToken()`),
+   nút Phát/Tạm dừng → `CobaltMediaSession.sendPlayPause()` (cùng đường phím media), chạm thông báo mở
+   lại app.
+4. Android huỷ `SurfaceView` video nên bộ giải mã video Starboard dừng codec (**video ngừng giải
+   mã**); **âm thanh vẫn phát** (đồng hồ phát lại theo audio renderer). Quay lại app (`onStart`):
+   dừng dịch vụ, bỏ cờ giữ MediaSession, SurfaceView được tạo lại (`mForceCreateNewVideoSurfaceView`)
+   và codec dựng lại ở khung kế tiếp.
+5. Dừng dịch vụ ở `onStart`, `onDestroy`, hoặc khi vuốt app khỏi Gần đây (`onTaskRemoved`). Khi tạm
+   dừng từ thông báo, thông báo vẫn ở lại (nút Phát).
+
+**Cửa sổ nổi (PiP)**: `onUserLeaveHint()` vào PiP 16:9 (`PictureInPictureParams`, API 26+) **chỉ khi**
+đang phát **và** máy có `FEATURE_PICTURE_IN_PICTURE` **và không** ở chế độ chia màn
+(`isInMultiWindowMode()`). API 31+: dùng `setAutoEnterEnabled(...)` (cập nhật khi đổi chế độ / phát /
+chia màn) thay cho gọi tay. Không có PiP (thường gặp ở đầu xe), API < 26, hoặc đang chia màn → **tự
+quay về Chỉ phát âm thanh** (ghi log). Vào PiP gọi `onPause` (không `onStop`): ở chế độ mobile
+`onPause` **không** blur trang nữa, nên video không dừng. `onPictureInPictureModeChanged` báo trang
+(`ttm-pip`).
+
+**Dừng phát**: như Cobalt gốc (`onPause` blur trang, `onStop` ẩn WebContents, huỷ MediaSession).
+
+**Chia màn (launcher 3 ô của xe)**: không khoá hướng, `resizeableActivity="true"`; `configChanges` đã
+gồm `orientation|screenSize|smallestScreenSize|screenLayout` nên đổi kích thước ô **không tạo lại
+Activity, không tải lại trang** (`onMultiWindowModeChanged`/`onConfigurationChanged` chỉ ghi log và
+cập nhật PiP params). `onPause` khi chạm ô khác: không blur trang (trừ khi Dừng phát), userscript chặn
+`blur` cửa sổ.
+
+**Giới hạn / chưa kiểm**: chưa biên dịch, chưa chạy trên đầu xe. Đường phát nền dựa trên việc
+Starboard audio renderer tiếp tục khi codec video bị huỷ (đọc mã: `MediaCodecVideoDecoder::
+OnSurfaceDestroyed` → `TeardownCodec`, ghi đầu vào sau đó bỏ qua; đồng hồ là audio renderer). Nếu
+trên máy thật video renderer chặn audio (thiếu khung), cần thêm bước tắt track video — Starboard
+renderer hiện **không** hỗ trợ `OnTracksChanged`, nên tối ưu "tắt track video khi ẩn" của Chromium
+không áp dụng. API 33+: thông báo cần quyền `POST_NOTIFICATIONS` để **hiện**, dịch vụ vẫn chạy.
 
 ## 5. Nút Back, toàn màn hình, xoay màn hình
 
@@ -274,8 +328,9 @@ Lời gọi cầu nối là IPC đồng bộ, nên được gom lại tối đa 
   vào cả vùng tai thỏ (`LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`). API < 30 dùng
   `SYSTEM_UI_FLAG_IMMERSIVE_STICKY`. Áp lại ở `onWindowFocusChanged` (sau hộp thoại/IME).
   `decorFitsSystemWindows` được giữ `true` để `adjustResize` vẫn thu nhỏ trang khi bàn phím mở.
-* **Xoay**: `sensorLandscape` trong manifest. `configChanges` đã có `orientation|screenSize` nên xoay
-  giữa 2 chiều ngang không tạo lại Activity.
+* **Xoay / chia màn (v6)**: không khoá hướng, `resizeableActivity="true"`. `configChanges` đã có
+  `orientation|screenSize|smallestScreenSize|screenLayout` nên xoay hoặc đổi ô chia màn không tạo lại
+  Activity.
 * **Manifest**: chỉ có **một** template dùng chung cho cả bản TV
   (`cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2`, được `//cobalt/android:cobalt_manifest` dùng). Giữ nguyên
   `android.hardware.touchscreen required="false"` và `android.software.leanback required="false"` để
@@ -341,8 +396,8 @@ Một `FrameLayout` thường trả `null`, nên bàn phím có thể hiện nh�
 | Trình phát | Chạm 1 lần | Hiện/ẩn điều khiển | YouTube |
 | Trình phát | Chạm đúp trái/phải | Tua −10s / +10s | YouTube |
 | Trình phát | Kéo thanh tiến trình | Tua, ảnh xem trước | YouTube |
-| Trình phát | **Vuốt dọc nửa trái** | **Độ sáng** + ô chỉ báo giữa màn | TizenTube |
-| Trình phát | **Vuốt dọc nửa phải** | **Âm lượng** + ô chỉ báo giữa màn | TizenTube |
+| Trình phát | **Chụm hai ngón** | Vừa khung ↔ Phủ kín + thông báo ngắn | TizenTube |
+| Rời app | Home / chuyển app | Theo "Khi chuyển app": phát nền / PiP / dừng | TizenTube + Android |
 | Mọi nơi | Nút/cử chỉ Back | Đóng bảng TT → thoát toàn màn hình → `history.back()` → về nền | TizenTube + Android |
 | Menu tài khoản | "Cài đặt TizenTube" | Mở bảng cài đặt | TizenTube |
 | Ô tìm kiếm | Chạm | Bàn phím Android | Chromium IME |
@@ -476,9 +531,11 @@ nguội trên runner miễn phí **gần như chắc chắn hết đĩa hoặc h
 | --- | --- |
 | `cobalt/android/tizentube_mobile.gni` | GN arg `tizentube_mobile_ui` (mặc định `true`). |
 | `cobalt/android/BUILD.gn` | Truyền arg vào manifest; thêm `TizenTubeMobileBridge.java`. |
-| `cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2` | `APP_URL`, `sensorLandscape`, `tizentube.MOBILE_UI`, tắt splash (có điều kiện). |
+| `cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2` | `APP_URL`, `resizeableActivity`, `tizentube.MOBILE_UI`, tắt splash, `MediaPlaybackService` (có điều kiện). |
 | `cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java` | Cờ mobile, bỏ ép scale factor, tắt ép CSP, UA mobile, immersive, Back, cầu nối JS. |
-| `cobalt/android/apk/app/src/main/java/dev/cobalt/coat/javabridge/TizenTubeMobileBridge.java` | Cầu nối độ sáng / âm lượng. |
+| `cobalt/android/apk/app/src/main/java/dev/cobalt/coat/javabridge/TizenTubeMobileBridge.java` | Cầu nối: chế độ "Khi chuyển app" (SharedPreferences), trạng thái phát. |
+| `cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaPlaybackService.java` | Dịch vụ tiền cảnh phát nền + thông báo MediaStyle (v6). |
+| `cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltMediaSession.java` | Giữ MediaSession khi phát nền, trạng thái/metadata cho thông báo (v6). |
 | `cobalt/shell/android/java/src/dev/cobalt/shell/Shell.java` | Chọn `ContentViewRenderView` làm container IME. |
 | `cobalt/shell/android/java/src/dev/cobalt/shell/ContentViewRenderView.java` | Chuyển tiếp `onCreateInputConnection` / focus tới ImeAdapter. |
 | `cobalt/browser/switches.h` | Switch `--tizentube-mobile-ui`. |
@@ -490,6 +547,19 @@ nguội trên runner miễn phí **gần như chắc chắn hết đĩa hoặc h
 | `.github/workflows/android_touch_mobile.yaml` | Workflow build APK arm64 chạy tay. |
 
 ## 12. Kết quả kiểm tra (không build toàn bộ)
+
+### Lượt v6 (đầu xe BAIC Beijing X7, chia màn)
+
+* `minSdkVersion` của APK = **24** (`build/config/android/config.gni`: `default_min_sdk_version = 24`
+  khi `is_cobalt`); target 36. Mã Java mới chặn API 26 (kênh thông báo, `PictureInPictureParams`,
+  `startForegroundService`), 29 (`startForeground` có type), 31 (`setAutoEnterEnabled`).
+* Java: không có JDK/android.jar trong máy này; đã phân tích cú pháp 4 tệp đổi bằng `javalang`
+  (OK) và đối chiếu tay API (`MediaMetadata.getTitle/getArtist`, `MediaSessionCompat.Token.getToken`,
+  `evaluateJavaScript`, `Log`). **Chưa biên dịch.**
+* Manifest render (jinja2) cả 2 chế độ, XML hợp lệ.
+* Harness 62/62, host guard 23/23 (đã thêm kiểm tra không cài giả visibility ngoài YouTube).
+* Trang thật m.youtube.com, chạm, UA app, ở 1280×480@1,5 và các ô 427×480, 507×480, 600×480, 600×467
+  @1,5, 640×720, 900×700 @1: **100/100** (`/workspace/TizenTubeCobalt-test/results_v6.json`).
 
 ### Lượt designer v4 (thử lại trên m.youtube.com thật)
 

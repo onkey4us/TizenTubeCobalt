@@ -61,7 +61,12 @@
     'min-height:48px;padding:0 16px;cursor:pointer}',
     '#ttm-sheet label.ttm-sub{padding-left:32px}',
     '#ttm-sheet label.ttm-disabled{opacity:.45}',
-    '#ttm-sheet input[type=checkbox]{width:22px;height:22px;accent-color:#3ea6ff;flex:none}',
+    '#ttm-sheet input[type=checkbox],#ttm-sheet input[type=radio]{width:22px;height:22px;',
+    'accent-color:#3ea6ff;flex:none;margin:0}',
+    '#ttm-sheet fieldset.ttm-group{border:0;margin:0;padding:0;min-width:0}',
+    '#ttm-sheet fieldset.ttm-group legend{padding:8px 16px 4px;font-size:13px;font-weight:500;color:#aaa}',
+    '#ttm-sheet .ttm-info{margin:4px 0 0;padding:8px 16px;font-size:12px;color:#aaa;',
+    'font-variant-numeric:tabular-nums;border-top:1px solid rgba(255,255,255,.1)}',
     '#ttm-sheet select{min-height:40px;min-width:140px;border-radius:8px;background:#333;color:#fff;',
     'border:1px solid #555;font-size:14px;padding:0 8px}',
     '#ttm-sheet .ttm-body{padding-bottom:8px}'
@@ -134,6 +139,7 @@
   var backdrop = null;
   function closeSheet() {
     if (!backdrop) return false;
+    if (infoCleanup) { infoCleanup(); infoCleanup = null; }
     backdrop.remove();
     backdrop = null;
     return true;
@@ -152,6 +158,21 @@
     l.appendChild(span);
     l.appendChild(input);
     return l;
+  }
+
+  var infoCleanup = null;
+
+  /** One labelled group of radio rows (each row ≥ 48 px). */
+  function radioGroup(key, title, options, current) {
+    var fs = TTM.el('fieldset', { 'class': 'ttm-group', 'data-ttm-setting': key });
+    fs.appendChild(TTM.el('legend', null, [title]));
+    Object.keys(options).forEach(function (value) {
+      var input = TTM.el('input', { type: 'radio', name: 'ttm-' + key, value: value });
+      input.checked = value === current;
+      input.addEventListener('change', function () { if (input.checked) TTM.setSetting(key, value); });
+      fs.appendChild(TTM.el('label', { 'class': 'ttm-sub' }, [TTM.el('span', null, [options[value]]), input]));
+    });
+    return fs;
   }
 
   function openSheet() {
@@ -215,10 +236,19 @@
     speedLabel.appendChild(select);
     sheet.appendChild(speedLabel);
 
-    sheet.appendChild(checkbox(S.gestures, st.gestures, function (v) { TTM.setSetting('gestures', v); }));
+    sheet.appendChild(radioGroup('videoFit', S.videoFit, S.videoFitOptions, st.videoFit));
     sheet.appendChild(checkbox(S.autoFullscreen, st.autoFullscreen,
       function (v) { TTM.setSetting('autoFullscreen', v); }));
-    sheet.appendChild(checkbox(S.fillCrop, st.fillCrop, function (v) { TTM.setSetting('fillCrop', v); }));
+    sheet.appendChild(radioGroup('onLeave', S.onLeave, S.onLeaveOptions, st.onLeave));
+    var info = TTM.el('p', { 'class': 'ttm-info', 'aria-live': 'polite' });
+    function updateInfo() {
+      var dpr = Math.round((window.devicePixelRatio || 1) * 1000) / 1000;
+      info.textContent = S.screenInfo(dpr, screen.width, screen.height, innerWidth, innerHeight);
+    }
+    updateInfo();
+    window.addEventListener('resize', updateInfo);
+    infoCleanup = function () { window.removeEventListener('resize', updateInfo); };
+    sheet.appendChild(info);
     sheet = sheetRoot;
 
     // No bottom "Đóng" button (designer v5): ✕ in the header, Android Back and a tap

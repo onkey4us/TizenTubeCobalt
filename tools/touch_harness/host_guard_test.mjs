@@ -18,6 +18,8 @@ function run(url, { harness = false, topFrame = true } = {}) {
   const noop = () => {};
   const el = () => ({ style: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
     setAttribute: noop, appendChild: noop, addEventListener: noop, querySelector: () => null });
+  // documentElement/head/body are null: like AddDocumentStartJavaScript, the allowed-host
+  // cases below also check that no module touches the DOM root before it exists.
   const document = {
     readyState: 'loading', head: null, documentElement: null, body: null,
     createElement: () => { touched.push('createElement'); return el(); },
@@ -38,6 +40,13 @@ function run(url, { harness = false, topFrame = true } = {}) {
     innerWidth: 915, innerHeight: 412,
   };
   const realParse = win.JSON.parse;
+  // Document.prototype with native-like getters, to detect the visibility spoof (module 05).
+  const nativeHidden = function () { return true; };
+  const DocProto = {};
+  Object.defineProperty(DocProto, 'hidden', { configurable: true, get: nativeHidden });
+  const nativeHasFocus = function () { return false; };
+  DocProto.hasFocus = nativeHasFocus;
+  win.Document = function Document() {}; win.Document.prototype = DocProto;
   win.window = win; win.self = win; win.top = topFrame ? win : {};
   if (harness) win.__TIZENTUBE_MOBILE_HARNESS__ = true;
   win.fetch = function () {}; win.Response = function () {}; win.Response.prototype.json = function () {};
@@ -46,7 +55,8 @@ function run(url, { harness = false, topFrame = true } = {}) {
   for (const m of modules) vm.runInContext(m.src, ctx, { filename: m.f });
   return {
     active: !!win.TTM,
-    hooked: win.JSON.parse !== realParse || win.Response.prototype.json !== realJson || win.fetch !== realFetch,
+    hooked: win.JSON.parse !== realParse || win.Response.prototype.json !== realJson || win.fetch !== realFetch ||
+      Object.getOwnPropertyDescriptor(DocProto, 'hidden').get !== nativeHidden || DocProto.hasFocus !== nativeHasFocus,
     touched: touched.length,
     backHook: typeof win.__tizentubeMobileHandleBack === 'function',
   };

@@ -43,10 +43,15 @@
     return realFetch(input, init);
   };
 
-  // Mock of dev.cobalt.coat.javabridge.TizenTubeMobileBridge. Toggled from the UI.
-  var state = { volume: 0.5, brightness: 0.6 };
+  // Mock of dev.cobalt.coat.javabridge.TizenTubeMobileBridge (v6: leave mode + playing
+  // state). getVolume/getBrightness are only kept so tests can prove nothing changes them.
+  var state = { volume: 0.5, brightness: 0.6, leave: 'audio' };
   window.__harnessMockBridge = {
-    getBridgeVersion: function () { return 1; },
+    getBridgeVersion: function () { return 2; },
+    getLeaveMode: function () { return state.leave; },
+    setLeaveMode: function (m) { state.leave = m; if (window.harnessLog) window.harnessLog('bridge: leave mode = ' + m, 'bridge'); },
+    setPlaying: function (p) { window.__harnessMockBridge.__playing = p; if (window.harnessLog) window.harnessLog('bridge: playing = ' + p, 'bridge'); },
+    __playing: null,
     getVolume: function () { return state.volume; },
     setVolume: function (v) {
       state.volume = Math.round(Math.max(0, Math.min(1, v)) * 15) / 15;  // 15 steps like STREAM_MUSIC.

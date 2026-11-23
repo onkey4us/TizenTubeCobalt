@@ -47,13 +47,16 @@
     SKIP_EPSILON_S: 0.3,
     POLL_MS: 500,
     SPEEDS: [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3],
-    GESTURE_MIN_DY: 24,
-    GESTURE_DIRECTION_RATIO: 1.5,
-    GESTURE_EDGE_EXCLUDE: 32,
-    GESTURE_BOTTOM_EXCLUDE: 72,
-    GESTURE_TOP_EXCLUDE: 48,
-    GESTURE_FULL_SWEEP_FRACTION: 0.8,
-    INDICATOR_HIDE_MS: 700,
+    // Two-finger pinch on the player toggles fit <-> fill once the finger distance
+    // changes by this factor (and at least PINCH_MIN_PX).
+    PINCH_RATIO: 1.25,
+    PINCH_MIN_PX: 40,
+    MODE_TOAST_MS: 1200,
+    // Auto landscape fill only when innerWidth/innerHeight is above ENTER and leaves it
+    // below EXIT (hysteresis), re-evaluated after RESIZE_DEBOUNCE_MS without changes.
+    FILL_ASPECT_ENTER: 1.6,
+    FILL_ASPECT_EXIT: 1.5,
+    RESIZE_DEBOUNCE_MS: 250,
     AD_FAST_FORWARD_RATE: 16
   };
 
@@ -63,13 +66,17 @@
     sbCategories: { sponsor: true, selfpromo: true, interaction: true, intro: false,
       outro: false, preview: false, music_offtopic: true, filler: false },
     speed: 1,
-    gestures: true,
-    // Landscape: fill the screen when a video plays (real fullscreen, CSS fallback).
+    // Wide window (aspect > FILL_ASPECT_ENTER): fill the window when a video plays.
     autoFullscreen: true,
-    // In fill mode crop the video to the screen (object-fit: cover) instead of
-    // showing black side bars on 20:9 phones.
-    fillCrop: true
+    // Default video framing: 'fit' = object-fit: contain (whole frame, black bars),
+    // 'fill' = cover (crop to the window). Pinch toggles it per video.
+    videoFit: 'fit',
+    // "Khi chuyển app": 'audio' = keep playing audio in the background (default, no PiP
+    // window over the car map), 'pip' = picture-in-picture, 'stop' = pause as before.
+    // Mirrored to Java (SharedPreferences) through window.TizenTubeMobile.
+    onLeave: 'audio'
   };
+  var ENUMS = { videoFit: ['fit', 'fill'], onLeave: ['audio', 'pip', 'stop'] };
 
   /** Vietnamese UI strings. */
   var STRINGS = {
@@ -80,9 +87,14 @@
     sbCategoriesTitle: 'Loại đoạn được bỏ qua',
     speed: 'Tốc độ phát mặc định',
     speedNormal: 'Bình thường',
-    gestures: 'Vuốt dọc chỉnh độ sáng / âm lượng',
-    autoFullscreen: 'Tự động toàn màn hình khi xem (màn ngang)',
-    fillCrop: 'Phủ kín màn hình (cắt bớt mép video)',
+    autoFullscreen: 'Tự động toàn màn hình khi xem (màn rộng)',
+    videoFit: 'Khung video',
+    videoFitOptions: { fit: 'Vừa khung', fill: 'Phủ kín' },
+    onLeave: 'Khi chuyển app',
+    onLeaveOptions: { audio: 'Chỉ phát âm thanh', pip: 'Cửa sổ nổi (PiP)', stop: 'Dừng phát' },
+    screenInfo: function (dpr, sw, sh, iw, ih) {
+      return 'DPR ' + dpr + ' · màn ' + sw + '×' + sh + ' · khung ' + iw + '×' + ih;
+    },
     close: 'Đóng',
     undo: 'Hoàn tác',
     volume: 'Âm lượng',
@@ -119,6 +131,8 @@
             Object.keys(DEFAULTS.sbCategories).forEach(function (c) {
               if (typeof saved.sbCategories[c] === 'boolean') s.sbCategories[c] = saved.sbCategories[c];
             });
+          } else if (ENUMS[k]) {
+            if (ENUMS[k].indexOf(saved[k]) >= 0) s[k] = saved[k];
           } else if (typeof saved[k] === typeof DEFAULTS[k]) {
             s[k] = saved[k];
           }
@@ -133,12 +147,38 @@
   var settings = loadSettings();
   var listeners = [];
 
+  /**
+   * Native bridge (dev.cobalt.coat.javabridge.TizenTubeMobileBridge, exposed as
+   * window.TizenTubeMobile by Cobalt's JavascriptInjector, YouTube origins only).
+   * Java keeps "onLeave" in SharedPreferences so it is known before any page loads
+   * (onUserLeaveHint / onStop). Java is the source of truth for onLeave: if the page's
+   * localStorage disagrees (e.g. it was cleared), take the Java value.
+   */
+  function bridge() {
+    var b = window.TizenTubeMobile;
+    return b && typeof b.getBridgeVersion === 'function' ? b : null;
+  }
+  try {
+    var b0 = bridge();
+    if (b0 && typeof b0.getLeaveMode === 'function') {
+      var javaMode = b0.getLeaveMode();
+      if (ENUMS.onLeave.indexOf(javaMode) >= 0) settings.onLeave = javaMode;
+    }
+  } catch (e) { /* bridge not ready */ }
+  function pushLeaveModeToJava() {
+    try {
+      var b = bridge();
+      if (b && typeof b.setLeaveMode === 'function') b.setLeaveMode(settings.onLeave);
+    } catch (e) { console.warn('[TizenTube] setLeaveMode failed', e); }
+  }
+
   function saveSettings() {
     try {
       window.localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(settings));
     } catch (e) {
       console.warn('[TizenTube] cannot save settings', e);
     }
+    pushLeaveModeToJava();
     listeners.forEach(function (fn) { try { fn(settings); } catch (e) { console.error(e); } });
   }
 
@@ -232,7 +272,7 @@
     setSetting: setSetting, saveSettings: saveSettings,
     onSettingsChange: function (fn) { listeners.push(fn); },
     onReady: onReady, overlayParent: overlayParent, addStyle: addStyle, log: log,
-    el: el, svgIcon: svgIcon,
+    el: el, svgIcon: svgIcon, bridge: bridge, ENUMS: ENUMS,
     // Back handlers registered by modules; see __tizentubeMobileHandleBack.
     // The LAST registered runs FIRST (settings sheet before layout fill).
     backHandlers: [],

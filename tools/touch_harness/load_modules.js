@@ -6,11 +6,12 @@
   'use strict';
   var MODULES = [
     'tizentube_mobile_00_core.js',
+    'tizentube_mobile_05_visibility.js',
     'tizentube_mobile_10_adblock.js',
     'tizentube_mobile_20_player.js',
     'tizentube_mobile_25_layout.js',
     'tizentube_mobile_30_settings.js',
-    'tizentube_mobile_40_gestures.js'
+    'tizentube_mobile_40_background.js'
   ];
   var BASES = ['../../cobalt/shell/embedded_resources/cobalt_java_script_polyfill/', 'modules/'];
 
