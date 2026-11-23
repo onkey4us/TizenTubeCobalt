@@ -145,7 +145,10 @@ GpuMemoryBufferHandle GpuMemoryBufferHandle::Clone() const {
 #elif BUILDFLAG(IS_WIN)
   handle.dxgi_handle_ = dxgi_handle_.Clone();
 #elif BUILDFLAG(IS_ANDROID)
-  NOTIMPLEMENTED();
+  // Android has no platform native handle in GpuMemoryBufferHandle to clone
+  // here (AHardwareBuffer handles travel separately); only |region_| below is
+  // duplicated. Intentionally silent: the former NOTIMPLEMENTED() spammed
+  // logcat ("gpu_memory_buffer.cc:148 Not implemented") in Cobalt builds.
 #endif
   handle.region_ = region_.Duplicate();
   return handle;
