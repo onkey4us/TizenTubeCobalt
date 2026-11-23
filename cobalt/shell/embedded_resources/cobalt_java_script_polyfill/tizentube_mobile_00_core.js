@@ -74,9 +74,11 @@
     // "Khi chuyển app": 'audio' = keep playing audio in the background (default, no PiP
     // window over the car map), 'pip' = picture-in-picture, 'stop' = pause as before.
     // Mirrored to Java (SharedPreferences) through window.TizenTubeMobile.
-    onLeave: 'audio'
+    onLeave: 'audio',
+    // v7 codec gate (module 07): 'auto' = reject AV1, >1080p, >60 fps; 'h264' = also VP9/VP8.
+    codec: 'auto'
   };
-  var ENUMS = { videoFit: ['fit', 'fill'], onLeave: ['audio', 'pip', 'stop'] };
+  var ENUMS = { videoFit: ['fit', 'fill'], onLeave: ['audio', 'pip', 'stop'], codec: ['auto', 'h264'] };
 
   /** Vietnamese UI strings. */
   var STRINGS = {
@@ -92,6 +94,9 @@
     videoFitOptions: { fit: 'Vừa khung', fill: 'Phủ kín' },
     onLeave: 'Khi chuyển app',
     onLeaveOptions: { audio: 'Chỉ phát âm thanh', pip: 'Cửa sổ nổi (PiP)', stop: 'Dừng phát' },
+    codec: 'Codec',
+    codecOptions: { auto: 'Tự động (chặn AV1)', h264: 'Ưu tiên H.264' },
+    codecNote: 'Đổi codec có hiệu lực từ video tiếp theo.',
     screenInfo: function (dpr, sw, sh, iw, ih) {
       return 'DPR ' + dpr + ' · màn ' + sw + '×' + sh + ' · khung ' + iw + '×' + ih;
     },

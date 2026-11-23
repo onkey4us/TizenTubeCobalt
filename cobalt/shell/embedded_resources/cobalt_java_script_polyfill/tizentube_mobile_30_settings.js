@@ -65,6 +65,7 @@
     'accent-color:#3ea6ff;flex:none;margin:0}',
     '#ttm-sheet fieldset.ttm-group{border:0;margin:0;padding:0;min-width:0}',
     '#ttm-sheet fieldset.ttm-group legend{padding:8px 16px 4px;font-size:13px;font-weight:500;color:#aaa}',
+    '#ttm-sheet .ttm-note{margin:0;padding:0 16px 8px;font-size:12px;color:#aaa}',
     '#ttm-sheet .ttm-info{margin:4px 0 0;padding:8px 16px;font-size:12px;color:#aaa;',
     'font-variant-numeric:tabular-nums;border-top:1px solid rgba(255,255,255,.1)}',
     '#ttm-sheet select{min-height:40px;min-width:140px;border-radius:8px;background:#333;color:#fff;',
@@ -240,6 +241,9 @@
     sheet.appendChild(checkbox(S.autoFullscreen, st.autoFullscreen,
       function (v) { TTM.setSetting('autoFullscreen', v); }));
     sheet.appendChild(radioGroup('onLeave', S.onLeave, S.onLeaveOptions, st.onLeave));
+    var codecGroup = radioGroup('codec', S.codec, S.codecOptions, st.codec);
+    codecGroup.appendChild(TTM.el('p', { 'class': 'ttm-note' }, [S.codecNote]));
+    sheet.appendChild(codecGroup);
     var info = TTM.el('p', { 'class': 'ttm-info', 'aria-live': 'polite' });
     function updateInfo() {
       var dpr = Math.round((window.devicePixelRatio || 1) * 1000) / 1000;

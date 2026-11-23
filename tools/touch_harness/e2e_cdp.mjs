@@ -312,6 +312,44 @@ try {
   check('Back #2 exits fill mode', modeAfter === 'off' || (back2 === false && modeAfter === 'real'), 'back2=' + back2 + ' mode=' + modeAfter);
   check('header visible again after exit', modeAfter !== 'off' || (await ev(`getComputedStyle(document.getElementById('header-bar')).display !== 'none'`)));
 
+  // ------------------------------------------------------------- v7 checks
+  const codec = await ev(`(() => { const its = t => MediaSource.isTypeSupported(t);
+    const r = { av1: its('video/mp4; codecs="av01.0.05M.08"'), vp9: its('video/webm; codecs="vp9"'), avc: its('video/mp4; codecs="avc1.4d401f"'),
+      uhd: its('video/webm; codecs="vp9"; width=3840; height=2160'), hfr: its('video/mp4; codecs="avc1.4d401f"; framerate=120'),
+      audio: its('audio/webm; codecs="opus"'), cptAv1: document.createElement('video').canPlayType('video/mp4; codecs="av01.0.05M.08"') };
+    return r; })()`);
+  check('v7 codec gate (auto): av01 ✗, 2160p ✗, 120fps ✗, vp9/avc1/opus ✓', !codec.av1 && !codec.uhd && !codec.hfr && codec.vp9 && codec.avc && codec.audio && codec.cptAv1 === '', JSON.stringify(codec));
+  const dec = await ev(`Promise.all([navigator.mediaCapabilities.decodingInfo({ type: 'media-source', video: { contentType: 'video/mp4; codecs="av01.0.08M.08"', width: 1920, height: 1080, bitrate: 2e6, framerate: 30 } }),
+    navigator.mediaCapabilities.decodingInfo({ type: 'media-source', video: { contentType: 'video/mp4; codecs="avc1.640028"', width: 3840, height: 2160, bitrate: 2e7, framerate: 30 } })]).then(r => r.map(x => x.supported))`);
+  check('v7 decodingInfo: av1 / 2160p unsupported', dec[0] === false && dec[1] === false, JSON.stringify(dec));
+  await ev(`TTM.setSetting('codec', 'h264')`);
+  const h264 = await ev(`({ vp9: MediaSource.isTypeSupported('video/webm; codecs="vp9"'), vp8: MediaSource.isTypeSupported('video/webm; codecs="vp8"'), avc: MediaSource.isTypeSupported('video/mp4; codecs="avc1.4d401f"') })`);
+  check('v7 codec "Ưu tiên H.264": vp9/vp8 ✗, avc1 ✓', !h264.vp9 && !h264.vp8 && h264.avc, JSON.stringify(h264));
+  await ev(`TTM.setSetting('codec', 'auto')`);
+  check('v7 codec auto + bridge hasHardwareDecoder(vp9)=true (harness stub): vp9 allowed', (await ev(`MediaSource.isTypeSupported('video/webm; codecs="vp9"')`)) === true);
+  const light = await ev(`(() => { const e = document.querySelector('.mock-controls button') || document.body; const c = getComputedStyle(e);
+    return { cls: document.documentElement.classList.contains('ttm-light'), tr: c.transitionDuration, an: c.animationDuration, sh: c.boxShadow, bf: c.backdropFilter }; })()`);
+  check('v7 light CSS: transitions/animations ~0, no box-shadow/backdrop-filter', light.cls && parseFloat(light.tr) <= 0.001 && parseFloat(light.an) <= 0.001 && light.sh === 'none' && (light.bf === 'none' || !light.bf), JSON.stringify(light));
+  // Inline preview guard: a feed preview video outside the player must not play.
+  const prev = await ev(`(async () => { const tile = document.querySelector('ytm-rich-item-renderer'); const v = document.createElement('video');
+    v.muted = true; v.src = document.querySelector('#movie_player video').currentSrc || ''; tile.appendChild(v);
+    let err = null; try { await v.play(); } catch (e) { err = e.name; } await new Promise(r => setTimeout(r, 300));
+    const r = { err, paused: v.paused, blocked: TTM.light.stats.blockedPlays }; v.remove(); return r; })()`);
+  check('v7 inline preview <video> outside the watch player cannot play', prev.err === 'NotAllowedError' && prev.paused, JSON.stringify(prev));
+  // Command channel + metadata hook + bridge reports.
+  const cmd = await ev(`(async () => { const v = document.querySelector('#movie_player video'); await v.play().catch(()=>{}); await new Promise(r => setTimeout(r, 300));
+    const t0 = v.currentTime; window.dispatchEvent(new CustomEvent('ttm-cmd', { detail: 'seek+10' })); await new Promise(r => setTimeout(r, 300));
+    const t1 = v.currentTime; window.dispatchEvent(new CustomEvent('ttm-cmd', { detail: 'seek-10' })); await new Promise(r => setTimeout(r, 300));
+    const t2 = v.currentTime; window.dispatchEvent(new CustomEvent('ttm-cmd', { detail: 'toggle' })); await new Promise(r => setTimeout(r, 300));
+    const paused = v.paused; window.dispatchEvent(new CustomEvent('ttm-cmd', { detail: 'toggle' })); await new Promise(r => setTimeout(r, 300));
+    return { fwd: +(t1 - t0).toFixed(1), back: +(t2 - t1).toFixed(1), pausedAfterToggle: paused, playingAfter2nd: !v.paused, log: TTM.background.cmdLog.slice(-4) }; })()`);
+  check('v7 ttm-cmd: seek±10, toggle pause/play', cmd.fwd >= 9 && cmd.back <= -9 && cmd.pausedAfterToggle && cmd.playingAfter2nd, JSON.stringify(cmd));
+  const meta = await ev(`(() => { if (!navigator.mediaSession) return 'n/a'; navigator.mediaSession.metadata = new MediaMetadata({ title: 'T', artist: 'A', artwork: [{ src: 'https://x/a.png', sizes: '320x180' }] });
+    return TizenTubeMobile.__meta; })()`);
+  check('v7 mediaSession.metadata setter hooked → bridge.setMetadata', meta && meta.title === 'T' && meta.artist === 'A' && meta.artwork === 'https://x/a.png', JSON.stringify(meta));
+  const rep = await ev(`new Promise(r => setTimeout(() => r({ watch: TizenTubeMobile.__watch, rect: TizenTubeMobile.__rect }), 1200))`);
+  check('v7 bridge: setWatchPage(true) + setPlayerRect(x,y,w,h,dpr)', rep.watch === true && rep.rect && rep.rect[2] > 0 && rep.rect[3] > 0 && rep.rect[4] > 0, JSON.stringify(rep));
+
   const errs = consoleMsgs.filter(m => /EXCEPTION|^error/.test(m) && !/JSDelivr/.test(m));
   check('no JS exceptions / console errors', errs.length === 0, errs.join(' | '));
 } catch (e) {

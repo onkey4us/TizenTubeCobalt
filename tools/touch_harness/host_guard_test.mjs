@@ -47,6 +47,18 @@ function run(url, { harness = false, topFrame = true } = {}) {
   const nativeHasFocus = function () { return false; };
   DocProto.hasFocus = nativeHasFocus;
   win.Document = function Document() {}; win.Document.prototype = DocProto;
+  // Media globals, to detect the codec gate (07) / play gate (08) / metadata hook (40).
+  const nativeIts = function () { return true; };
+  win.MediaSource = { isTypeSupported: nativeIts };
+  const nativeCpt = function () { return 'probably'; }, nativePlay = function () {};
+  win.HTMLMediaElement = function HTMLMediaElement() {};
+  win.HTMLMediaElement.prototype = { canPlayType: nativeCpt, play: nativePlay };
+  const nativeDec = function () {};
+  win.navigator = { mediaCapabilities: { decodingInfo: nativeDec } };
+  const mdSet = function () {};
+  win.MediaSession = function MediaSession() {};
+  Object.defineProperty(win.MediaSession.prototype, 'metadata', { configurable: true, get() {}, set: mdSet });
+  win.DOMException = function DOMException() {};
   win.window = win; win.self = win; win.top = topFrame ? win : {};
   if (harness) win.__TIZENTUBE_MOBILE_HARNESS__ = true;
   win.fetch = function () {}; win.Response = function () {}; win.Response.prototype.json = function () {};
@@ -56,7 +68,11 @@ function run(url, { harness = false, topFrame = true } = {}) {
   return {
     active: !!win.TTM,
     hooked: win.JSON.parse !== realParse || win.Response.prototype.json !== realJson || win.fetch !== realFetch ||
-      Object.getOwnPropertyDescriptor(DocProto, 'hidden').get !== nativeHidden || DocProto.hasFocus !== nativeHasFocus,
+      Object.getOwnPropertyDescriptor(DocProto, 'hidden').get !== nativeHidden || DocProto.hasFocus !== nativeHasFocus ||
+      win.MediaSource.isTypeSupported !== nativeIts || win.HTMLMediaElement.prototype.canPlayType !== nativeCpt ||
+      win.HTMLMediaElement.prototype.play !== nativePlay || win.navigator.mediaCapabilities.decodingInfo !== nativeDec ||
+      Object.getOwnPropertyDescriptor(win.MediaSession.prototype, 'metadata').set !== mdSet ||
+      Object.getOwnPropertyDescriptor(win, 'ytcfg') !== undefined,
     touched: touched.length,
     backHook: typeof win.__tizentubeMobileHandleBack === 'function',
   };

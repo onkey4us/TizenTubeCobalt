@@ -7,6 +7,8 @@
   var MODULES = [
     'tizentube_mobile_00_core.js',
     'tizentube_mobile_05_visibility.js',
+    'tizentube_mobile_07_codec.js',
+    'tizentube_mobile_08_light.js',
     'tizentube_mobile_10_adblock.js',
     'tizentube_mobile_20_player.js',
     'tizentube_mobile_25_layout.js',

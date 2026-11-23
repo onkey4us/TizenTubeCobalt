@@ -81,6 +81,8 @@ cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
   tizentube_mobile_25_layout.js    màn ngang tự phủ kín màn hình, ẩn "Mở ứng dụng"
   tizentube_mobile_30_settings.js  mục "Cài đặt TizenTube" trong menu tài khoản + bảng cài đặt
   tizentube_mobile_05_visibility.js giả visibility/focus khi "Khi chuyển app" ≠ Dừng phát (v6)
+  tizentube_mobile_07_codec.js     chặn AV1, >1080p, >60 fps; VP9 chỉ khi có giải mã cứng (v7)
+  tizentube_mobile_08_light.js     tắt xem trước trong feed, tắt hiệu ứng/bóng/glow (v7)
   tizentube_mobile_40_background.js báo Java video có đang phát (v6; thay module vuốt dọc cũ)
 ```
 
@@ -546,7 +548,124 @@ nguội trên runner miễn phí **gần như chắc chắn hết đĩa hoặc h
 | `tools/touch_harness/*` | Harness + kiểm thử tự động (`e2e_cdp.mjs`, `host_guard_test.mjs`). |
 | `.github/workflows/android_touch_mobile.yaml` | Workflow build APK arm64 chạy tay. |
 
+## 4c. v7: nhẹ hơn, render đóng băng, lớp phủ native, phím vô lăng
+
+**Bản release (gold).** Đã rà `cobalt_is_release_build` / `COBALT_IS_RELEASE_BUILD` /
+`is_official_build` / `OFFICIAL_BUILD`:
+* Userscript (`embed_polyfilled_javascript`, `Shell::RegisterInjectedJavaScript`), JavaBridge
+  (`JavascriptInjector`, `TizenTubeMobile`, `HTMLMediaElementExtension`), `tizentube_mobile_ui`,
+  các cờ dòng lệnh của chế độ mobile (`getCommandLineArgs`): **không bị chặn**. `isReleaseBuild()`
+  chỉ bỏ `commandLineArgs` từ intent (tham số adb), không ảnh hưởng cờ của ta.
+* Gold mặc định bật CSP (`CobaltSecureNavigationThrottle`) → chế độ mobile đã thêm
+  `--csp-enforcement=false` (có từ trước). HTTPS-only vẫn bật (m.youtube.com là https).
+* `app_event_runner.cc` (gold ép URL khởi động về `youtube.com/tv`) và `SetMinLogLevel(FATAL)` chỉ ở
+  `BUILDFLAG(IS_STARBOARD)`; `is_starboard = false` khi `target_os == "android"` → **không áp dụng**.
+* Gold tắt DevTools (`CreateDevToolsManagerDelegate` → null), proxy dòng lệnh, heap profiling: không
+  cần cho app.
+* `ui/gfx/gpu_memory_buffer.cc`: bỏ `NOTIMPLEMENTED()` ở nhánh Android của `Clone()` (Android không có
+  native handle để clone ở đây) → hết spam `gpu_memory_buffer.cc:148 Not implemented`.
+* `version_code` 203 → **204** (gói giữ nguyên, keystore debug giữ nguyên).
+
+**Trang nhẹ hơn (`08_light`).** Tắt xem trước tự phát trong feed: cờ thử nghiệm của m.youtube.com
+(`enable_inline_muted_playback_on_web_search*`, `mweb_mixes_inline_playback`, …) bị ép `false` khi
+YouTube ghi `ytcfg` (hook `window.ytcfg` + `ytcfg.set`), ẩn `ytm-video-preview-portal` và các khung
+inline-player, và chặn cứng: `<video>` ngoài trình phát trang xem bị `pause()`, `play()` trả
+`NotAllowedError`. CSS toàn trang: transition/animation **1 ms** (không phải `none`, để
+`transitionend`/`animationend` của YouTube vẫn chạy, menu/bảng vẫn đóng), animation vô hạn chỉ chạy 1
+lần (spinner đứng yên), `box-shadow`/`backdrop-filter: none`, tắt lớp "cinematic" (canvas mờ vẽ lại mỗi
+khung) sau trình phát. Toast/bảng cài đặt có nền đặc + viền, vẫn rõ.
+
+**Codec (`07_codec`).** Hook `MediaSource.isTypeSupported` (và `ManagedMediaSource`,
+`WebKitMediaSource` nếu có), `HTMLMediaElement.canPlayType`, `navigator.mediaCapabilities.
+decodingInfo` (trả `{supported:false, smooth:false, powerEfficient:false}`) ở document start, trước khi
+player dò:
+* luôn chặn **AV1** (`av01`); chặn `width>1920`, `height>1080` (tham số `width=`/`height=` trong chuỗi
+  type, hoặc `video.width/height` của decodingInfo) và `framerate>60`;
+* Cài đặt **Codec**: "Tự động (chặn AV1)" (mặc định) / "Ưu tiên H.264" (chặn thêm VP9/VP8/`video/webm`
+  → YouTube phát `avc1`);
+* "Tự động" hỏi Java `TizenTubeMobile.hasHardwareDecoder('video/x-vnd.on2.vp9')` (`MediaCodecList`,
+  bỏ decoder phần mềm theo `MediaCodecUtil.isSoftwareDecoder`): **không có VP9 phần cứng → chặn VP9
+  luôn**, YouTube phát H.264.
+
+**VP9 trên BAIC X7.** Tài liệu máy (DiPlay-BAIC-BEIJING-X7, `docs/BAIC_X7.md`) ghi model
+`C3005H_MX8Q`, "Freescale i.MX8" → dòng **i.MX8QM/QXP** (hậu tố `MX8Q`), không phải i.MX8M. VPU của
+i.MX8QM/QXP là **Amphion "Malone"**: theo tài liệu VPU của NXP, giải mã cứng H.264, HEVC, VC-1,
+MPEG-2/4, VP8 (tùy bản BSP), **không có VP9**. (i.MX8M Quad có Hantro G2 thì có VP9.) Thông tin này
+lấy từ hiểu biết chung về dòng chip, chưa đối chiếu được datasheet trong phiên này và chưa đo trên xe. Vì vậy trên X7, VP9 sẽ giải mã bằng phần mềm
+(`c2.android.vp9`/`OMX.google.vp9`) trên CPU A53/A72 — đây là nguồn chính của >120% CPU. **Khuyến nghị:
+mặc định "Tự động"** (đã tự chọn H.264 khi máy không có VP9 phần cứng; máy khác có VP9 cứng vẫn dùng VP9
+tiết kiệm băng thông). Chưa xác minh trên máy thật: hãy xem `logcat` dòng `codec: hardware VP9 decoder:`
+của userscript, hoặc `dumpsys media.player`/`media_codecs.xml`.
+
+**Đóng băng render khi ẩn hẳn.** `onStop` + đang phát + chế độ "Chỉ phát âm thanh"/PiP-dự-phòng:
+v7 gọi `updateShellActivityVisible(false)` → `WebContents` **HIDDEN** → `WebContentsImpl::WasHidden` →
+`RenderWidgetHostViewAndroid::Hide` → `DelegatedFrameHost::WasHidden` + `RenderWidgetHostImpl::
+WasHidden`: compositor ngừng BeginFrame, Blink ngừng vẽ / `requestAnimationFrame`. Đây là thứ thật sự
+dừng tạo khung. Âm thanh vẫn phát: `WebMediaPlayerImpl::ShouldPausePlaybackWhenHidden()` = false cho
+video có tiếng khi "background video playback" bật (mặc định) và `--disable-background-media-suspend`
+tắt suspend nền; renderer Starboard không có hook visibility. JS trang vẫn thấy `hidden=false` (module
+05), `--disable-renderer-backgrounding` giữ ưu tiên tiến trình nên timer (SponsorBlock, tự phát tiếp)
+vẫn chạy. `onStart` hiện lại (`WasShown`). **Không** đóng băng khi `onPause` (chia màn, chạm ô bản đồ),
+**không** khi PiP (cửa sổ PiP hiện, không có `onStop`). "Dừng phát": như cũ. Chưa kiểm trên máy: nếu
+Blink vẫn dừng media khi trang ẩn thật trên Android, bỏ dòng `updateShellActivityVisible(false)` trong
+nhánh `mBackgroundPlaybackActive` của `onStop` để quay về hành vi v6 (không đóng băng).
+
+**Lớp phủ native (`TizenTubeOverlay.java`).** `FrameLayout` thêm trên nội dung web
+(`addContentView`), đặt **khớp khung trình phát** mà trang báo (`setPlayerRect`, CSS px × DPR):
+* giữa: −10s (56dp) · Phát/Tạm dừng (72dp) · +10s (56dp); góc trên: Quay lại (trái), Tìm kiếm (phải);
+  mép dưới: Video trước (trái), Video tiếp (phải), **trên** dải 40dp của thanh tua YouTube (không che);
+* nút tròn nền đen mờ, biểu tượng trắng vẽ bằng `Canvas`/`Path` — không tài nguyên mới, không deps mới;
+  thu nhỏ khi trình phát nhỏ nhưng không dưới 48dp;
+* hiện khi **chạm 1 lần** vào trình phát ở trang xem: `CobaltActivity.dispatchTouchEvent` chỉ **quan
+  sát** (không ăn sự kiện), chạm ngắn ít dịch chuyển, rồi đợi `getDoubleTapTimeout()`; có chạm thứ 2
+  → là chạm đúp tua của YouTube, không hiện. 2 ngón (chụm) → bỏ qua;
+* tự ẩn sau 3 s, mỗi lần bấm nút đếm lại; ẩn = `GONE`, không chặn chạm. Khi hiện: chạm ngoài nút (trong
+  khung) chỉ ẩn lớp phủ (ăn chạm để YouTube không bật/tắt điều khiển của nó lần nữa); chạm vào dải thanh
+  tua dưới cùng thì ẩn và **chuyển xuống trang**; chạm ngoài khung (danh sách bên dưới) ẩn và đi tiếp;
+* chỉ ở trang xem (`setWatchPage`), không ở PiP. Mục "Cài đặt TizenTube" nằm ở tab "Bạn" (không ở trang
+  xem) nên **không chồng vùng chạm**; lớp phủ JS cũ không có nút phát/tiếp nên không có gì để bỏ.
+
+**Kênh lệnh Java → trang.** `CobaltActivity.sendPageCommand()` (chỉ chuỗi trong danh sách trắng) →
+`evaluateJavaScript("window.dispatchEvent(new CustomEvent('ttm-cmd',{detail:'…'}))")`; module 40 thực
+hiện bằng API `#movie_player` đã kiểm trên trang thật: `playVideo`/`pauseVideo` (toggle theo
+`getPlayerState()`), `nextVideo`, `seekBy(±10)` (đồng bộ đồng hồ YouTube; dự phòng `video.currentTime`),
+prev = >3 s thì `seekTo(0)` (theo `getCurrentTime()` của player), ngược lại `previousVideo()` trong
+playlist hoặc `history.back()`; search = bấm nút tìm của thanh đầu (thoát phủ kín trước); back = đường
+Back của Activity (`handleMobileBack`).
+
+**MediaSession / phím vô lăng.** `CobaltMediaSession` (MediaSessionCompat có sẵn) nhận
+`setCommandSink`: `onSkipToNext/Previous`, `onFastForward/Rewind` → kênh lệnh (m.youtube.com không
+đăng ký handler nexttrack/seek nên `didReceiveAction` của Chromium không làm gì); `onPlay/onPause` vẫn
+qua Chromium. Ở chế độ TizenTube **luôn quảng bá** `ACTION_SKIP_TO_NEXT/PREVIOUS/FAST_FORWARD/REWIND/
+PLAY_PAUSE` để `MediaSessionCompat.onMediaButtonEvent` chuyển `KEYCODE_MEDIA_*` của vô lăng/tai nghe
+thành callback (nó bỏ qua action không có trong playback state). Tiền cảnh: `onKeyDown` bắt
+`KEYCODE_MEDIA_PLAY_PAUSE/PLAY/PAUSE/NEXT/PREVIOUS/FAST_FORWARD/REWIND/HEADSETHOOK` → kênh lệnh;
+nền: callback MediaSession ở trên (session giữ active khi phát nền, v6).
+* **Audio focus**: Chromium đã có `AudioFocusDelegate` (Java, `AudioFocusRequest` trên 26+): xin GAIN
+  khi phát, mất hẳn → tạm dừng, tạm thời → tạm dừng, can-duck → hạ âm; Cobalt bật
+  `DeferAudioFocusUntilAudible` để xin focus ngay. **Không thêm** bộ xin focus thứ hai (hai bộ sẽ giành
+  focus của nhau).
+* **Metadata**: Chromium đã chuyển `navigator.mediaSession.metadata` + ảnh bìa (ArtworkLoader, tải nền
+  + cache) sang `CobaltMediaSession` → widget/xe. Userscript hook setter và gửi `setMetadata(...)` làm
+  **dự phòng** (chỉ dùng khi Chromium chưa có metadata, không tải ảnh lần hai).
+* **DPAD** (trang xem, không có ô nhập đang focus — `ImeAdapterImpl.focusedNodeEditable()`): TRÁI/PHẢI
+  = −10/+10 s khi lớp phủ ẩn (khi hiện thì để di chuyển focus giữa các nút), GIỮA/ENTER = phát/tạm dừng
+  (hoặc bấm nút đang focus), LÊN/XUỐNG = hiện lớp phủ. Phím đã xử lý thì `onKeyUp` cũng bị nuốt.
+
 ## 12. Kết quả kiểm tra (không build toàn bộ)
+
+### Lượt v7
+
+* Harness 71/71, host guard 23/23 (thêm: không hook media/`ytcfg` ngoài YouTube), `node --check` mọi
+  tệp JS, Java: `javalang` 5 tệp OK (chưa biên dịch).
+* Trang thật (`/workspace/TizenTubeCobalt-test/results_v7.json`) **97/97** ở 900×700, 1280×480@1,5,
+  427×480, 507×480, 600×467 @1,5, 640×720: feed trang chủ/tìm kiếm cuộn → 0 `<video>` đang phát; cờ
+  inline bị ép false; transition/animation 1 ms, shadow/backdrop none; codec: av01/2160p/120fps bị từ
+  chối, video đang phát `avc1` (không phải av01, ≤1080p), "Ưu tiên H.264" → `avc1`, mô phỏng X7 không
+  VP9 cứng → "Tự động" phát `avc1`; kênh lệnh seek±10/pause/play/toggle/next/prev/search/back trên
+  player thật; hook metadata (tiêu đề, kênh, ảnh i.ytimg.com, thời lượng); bảng cài đặt có Codec + DPR +
+  ✕ 48px; kiểm hồi quy v6 (spoof visibility, vừa khung/phủ kín, cổng tỉ lệ, chạm đúp gốc). Lần chạy
+  đầy đủ đầu tiên có 4 lần chạm đúp D1 lệch giờ (máy đang build song song); chạy lại đều đạt.
 
 ### Lượt v6 (đầu xe BAIC Beijing X7, chia màn)
 

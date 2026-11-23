@@ -47,7 +47,11 @@
   // state). getVolume/getBrightness are only kept so tests can prove nothing changes them.
   var state = { volume: 0.5, brightness: 0.6, leave: 'audio' };
   window.__harnessMockBridge = {
-    getBridgeVersion: function () { return 2; },
+    getBridgeVersion: function () { return 3; },
+    hasHardwareDecoder: function (mime) { return window.__harnessHwVp9 !== false || mime !== 'video/x-vnd.on2.vp9'; },
+    setWatchPage: function (w) { window.__harnessMockBridge.__watch = w; },
+    setPlayerRect: function (x, y, w, h, dpr) { window.__harnessMockBridge.__rect = [x, y, w, h, dpr]; },
+    setMetadata: function (t, a, u, d) { window.__harnessMockBridge.__meta = { title: t, artist: a, artwork: u, durationMs: d }; },
     getLeaveMode: function () { return state.leave; },
     setLeaveMode: function (m) { state.leave = m; if (window.harnessLog) window.harnessLog('bridge: leave mode = ' + m, 'bridge'); },
     setPlaying: function (p) { window.__harnessMockBridge.__playing = p; if (window.harnessLog) window.harnessLog('bridge: playing = ' + p, 'bridge'); },
