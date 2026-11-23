@@ -16,8 +16,13 @@
  *    the "Bạn" (You) tab, /feed/library, which shows
  *    ytm-sign-in-promo-with-background-renderer; we add the row as a list
  *    item above that promo (inline, scrolls with the page, not floating).
- *  - Fallback: the player settings / overflow bottom sheet
- *    (ytm-bottom-sheet-renderer, ytm-menu-popup-renderer, .player-settings-menu).
+ *  - Fallback: the player settings / overflow menu (ytm-menu-popup-renderer,
+ *    .player-settings-menu, an OPEN bottom sheet inside bottom-sheet-container).
+ *    v7e: on the real m.youtube.com every feed / search item has its own closed
+ *    ytm-bottom-sheet-renderer (it is the item's ⋮ button wrapper). Injecting there put a
+ *    "Cài đặt TizenTube" button into every result row, and the last one ended up over the
+ *    bottom pivot bar ("Bạn" tab). Those are never used: only bottom sheets that are open
+ *    (inside bottom-sheet-container, or role=dialog) and not inside a feed item qualify.
  *  A MutationObserver on <body> re-injects whenever YouTube re-renders a menu.
  */
 (function () {
@@ -28,7 +33,8 @@
 
   var ACCOUNT_MENU_SELECTORS = ['ytm-multi-page-menu-renderer', 'ytm-account-section-list-renderer',
     'ytm-account-menu'];
-  var FALLBACK_MENU_SELECTORS = ['ytm-bottom-sheet-renderer', 'ytm-menu-popup-renderer',
+  var FALLBACK_MENU_SELECTORS = ['bottom-sheet-container ytm-bottom-sheet-renderer',
+    '[role="dialog"] ytm-bottom-sheet-renderer', 'ytm-menu-popup-renderer',
     '.player-settings-menu'];
   // Signed-out "Bạn" tab (/feed/library): insert before the sign-in promo.
   var SIGNED_OUT_ANCHORS = ['ytm-sign-in-promo-with-background-renderer', 'ytm-sign-in-promo-renderer'];
@@ -39,6 +45,10 @@
     'box-sizing:border-box;border:0;background:transparent;color:inherit;text-align:left;',
     'font:400 14px/1.4 Roboto,Arial,sans-serif;cursor:pointer}',
     '.ttm-entry:active{background:rgba(127,127,127,.2)}',
+    // v7e: the entry is a normal in-flow row; keep it (and anything else at the end of the
+    // page) scrollable above m.youtube.com's fixed bottom pivot bar (~57 px) + safe area.
+    'ytm-tab-renderer > .ttm-entry{position:relative;z-index:0}',
+    'body:has(ytm-pivot-bar-renderer) .ttm-entry{scroll-margin-bottom:calc(64px + env(safe-area-inset-bottom,0px))}',
     '.ttm-entry svg{width:24px;height:24px;flex:none;fill:currentColor}',
     '#ttm-sheet-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);',
     'display:flex;align-items:center;justify-content:center}',
@@ -93,7 +103,11 @@
     return b;
   }
 
+  // Feed / search / related items: never inject into their (⋮) wrappers.
+  var ITEM_SEL = 'ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-rich-item-renderer,' +
+    ' ytm-media-item, ytm-compact-radio-renderer, ytm-compact-playlist-renderer, ytm-reel-item-renderer';
   function injectInto(container) {
+    if (container.closest && container.closest(ITEM_SEL)) return false;
     if (!container || container.querySelector('[' + ROW_ATTR + ']')) return false;
     var anchor = container.querySelector('ytm-compact-link-renderer, ytm-menu-service-item-renderer,' +
       ' ytm-menu-navigation-item-renderer, .menu-item');
@@ -106,6 +120,10 @@
 
   function scan() {
     var found = false;
+    var stale = document.querySelectorAll('[' + ROW_ATTR + ']');
+    for (var k = 0; k < stale.length; k++) {
+      if (stale[k].closest(ITEM_SEL) || stale[k].closest('ytm-pivot-bar-renderer')) stale[k].remove();
+    }
     ACCOUNT_MENU_SELECTORS.forEach(function (sel) {
       document.querySelectorAll(sel).forEach(function (el) { found = injectInto(el) || found; });
     });

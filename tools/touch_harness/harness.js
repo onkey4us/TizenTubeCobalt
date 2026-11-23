@@ -204,17 +204,21 @@
   var sheet = null;
   $('overflow-btn').addEventListener('click', function (e) {
     e.stopPropagation();
-    if (sheet) { sheet.remove(); sheet = null; return; }
+    if (sheet) { (sheet.parentElement || sheet).remove(); sheet = null; return; }
     sheet = document.createElement('ytm-bottom-sheet-renderer');
     ['Chất lượng', 'Phụ đề', 'Tốc độ phát'].forEach(function (t) {
       var row = document.createElement('ytm-menu-service-item-renderer');
       row.textContent = t;
       sheet.appendChild(row);
     });
-    (document.fullscreenElement || document.body).appendChild(sheet);
+    // Open sheets on m.youtube.com live in bottom-sheet-container (closed per-item
+    // ytm-bottom-sheet-renderer wrappers do not).
+    var holder = document.createElement('bottom-sheet-container');
+    holder.appendChild(sheet);
+    (document.fullscreenElement || document.body).appendChild(holder);
   });
   document.addEventListener('click', function (e) {
-    if (sheet && !sheet.contains(e.target) && e.target.id !== 'overflow-btn') { sheet.remove(); sheet = null; }
+    if (sheet && !sheet.contains(e.target) && e.target.id !== 'overflow-btn') { (sheet.parentElement || sheet).remove(); sheet = null; }
   });
 
   $('search-btn').addEventListener('click', function () {

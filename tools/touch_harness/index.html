@@ -89,6 +89,22 @@
     </aside>
   </main>
 
+  <!-- v7e: real-like search result items (each with its own closed ⋮ bottom-sheet wrapper)
+       and the fixed bottom pivot bar. -->
+  <section id="mock-results">
+    <ytm-video-with-context-renderer class="item"><ytm-media-item>
+      <a class="media-item-thumbnail-container" href="#watch-r1" id="mock-r1-link"><ytm-thumbnail-cover class="video-thumbnail-container-large"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></ytm-thumbnail-cover></a>
+      <div class="media-item-details"><div class="media-channel">◉</div><div class="media-item-info"><div class="media-item-metadata"><a href="#watch-r1"><h3 class="media-item-headline">Kết quả 1 với tiêu đề rất dài để thử cắt hai dòng của danh sách gọn</h3><div>Kênh A · 1 Tr lượt xem</div></a></div>
+        <ytm-bottom-sheet-renderer class="media-item-menu"><button aria-label="Menu tác vụ">⋮</button></ytm-bottom-sheet-renderer></div></div>
+    </ytm-media-item></ytm-video-with-context-renderer>
+    <ytm-video-with-context-renderer class="item"><ytm-media-item>
+      <a class="media-item-thumbnail-container" href="#watch-r2"><ytm-thumbnail-cover class="video-thumbnail-container-large"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></ytm-thumbnail-cover></a>
+      <div class="media-item-details"><div class="media-channel">◉</div><div class="media-item-info"><div class="media-item-metadata"><a href="#watch-r2"><h3 class="media-item-headline">Kết quả 2</h3><div>Kênh B</div></a></div>
+        <ytm-bottom-sheet-renderer class="media-item-menu"><button aria-label="Menu tác vụ">⋮</button></ytm-bottom-sheet-renderer></div></div>
+    </ytm-media-item></ytm-video-with-context-renderer>
+  </section>
+  <ytm-pivot-bar-renderer id="mock-pivot" style="position:fixed;left:0;right:0;bottom:0;height:57px;background:#212121;display:flex;z-index:5"><span>Trang chủ</span><span>Shorts</span><span>Bạn</span></ytm-pivot-bar-renderer>
+
   <!-- Mock feed with ad items that must be hidden -->
   <section class="feed">
     <ytm-rich-item-renderer class="tile">Video 1</ytm-rich-item-renderer>

@@ -403,6 +403,20 @@ try {
     rowParent: document.querySelector('.ttm-row').parentElement.id, rowFirst: document.getElementById('mock-below').firstElementChild.className })`);
   check('v7d comment metadata carousel hidden, other carousels kept, toggle row first in .watch-below-the-player', car.comments === 'none' && car.other !== 'none' && car.rowParent === 'mock-below' && car.rowFirst === 'ttm-row', JSON.stringify(car));
 
+  // ------------------------------------------------------------- v7e checks
+  const e1 = await ev(`(() => { const items = [...document.querySelectorAll('#mock-results [data-ttm-entry]')].length;
+    return { inItems: items, inPivot: document.querySelectorAll('ytm-pivot-bar-renderer [data-ttm-entry]').length }; })()`);
+  check('v7e settings entry never injected into result items (⋮ wrappers) or the pivot bar', e1.inItems === 0 && e1.inPivot === 0, JSON.stringify(e1));
+  await send('Emulation.setDeviceMetricsOverride', { width: 900, height: 700, deviceScaleFactor: 1.5, mobile: true }); await sleep(900);
+  const c1 = await ev(`(() => { const m = document.querySelector('#mock-results ytm-media-item'), t = m.querySelector('.media-item-thumbnail-container').getBoundingClientRect(), r = m.getBoundingClientRect();
+    const menu = m.querySelector('.media-item-menu button').getBoundingClientRect(), h = m.querySelector('h3'); const hs = getComputedStyle(h);
+    return { compact: document.documentElement.classList.contains('ttm-compact'), thumb: [Math.round(t.width), Math.round(t.height)], rowH: Math.round(r.height),
+      thumbLeft: t.left < m.querySelector('h3').getBoundingClientRect().left, clamp: hs.webkitLineClamp, menu: [Math.round(menu.width), Math.round(menu.height)], avatar: getComputedStyle(m.querySelector('.media-channel')).display }; })()`);
+  check('v7e compact at 900×700: 160×90 thumb left, title clamp 2, row ≥ 48, ⋮ 48px', c1.compact && c1.thumb[0] === 160 && c1.thumb[1] === 90 && c1.thumbLeft && String(c1.clamp) === '2' && c1.rowH >= 48 && c1.menu[0] >= 24 && c1.avatar === 'none', JSON.stringify(c1));
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 480, deviceScaleFactor: 1.5, mobile: true }); await sleep(900);
+  check('v7e wide 1280×480 keeps YouTube layout (no compact)', (await ev(`document.documentElement.classList.contains('ttm-compact')`)) === false);
+  await send('Emulation.setDeviceMetricsOverride', { width: 915, height: 412, deviceScaleFactor: 2.6, mobile: true }); await sleep(900);
+
   const errs = consoleMsgs.filter(m => /EXCEPTION|^error/.test(m) && !/JSDelivr/.test(m));
   check('no JS exceptions / console errors', errs.length === 0, errs.join(' | '));
 } catch (e) {

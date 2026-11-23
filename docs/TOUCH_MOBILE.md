@@ -85,6 +85,7 @@ cobalt/shell/embedded_resources/cobalt_java_script_polyfill/
   tizentube_mobile_08_light.js     tắt xem trước trong feed, tắt hiệu ứng/bóng/glow, ảnh lazy, danh sách liên quan ≤ 8 (v7/v7b)
   tizentube_mobile_22_quality.js   "Chất lượng": giới hạn độ phân giải qua API player (v7b)
   tizentube_mobile_24_audioonly.js "Chỉ nghe" (144p, ẩn hình, ảnh bìa) + không tự tải bình luận (v7c)
+  tizentube_mobile_26_compact.js   danh sách gọn (ảnh 160×90 bên trái) trong ô hẹp / gần vuông (v7e)
   tizentube_mobile_40_background.js báo Java video có đang phát (v6; thay module vuốt dọc cũ)
 ```
 
@@ -727,7 +728,34 @@ trái-trên, Tìm kiếm phải-trên, Trước/Tiếp ở mép dưới ngay tr�
 chạm vào nền lớp phủ trước đây ẩn lớp phủ; nay mọi chạm lên lớp phủ (nút **và** nền) đều đếm lại 3 s
 (chạm vào dải thanh tua vẫn ẩn và chuyển xuống trang, chạm ngoài khung vẫn ẩn).
 
+## 4f. v7e: mục cài đặt không đè thanh dưới, danh sách gọn
+
+**Mục "Cài đặt TizenTube" đè tab "Bạn".** Nguyên nhân: đường dự phòng chèn mục vào mọi
+`ytm-bottom-sheet-renderer`, nhưng trên m.youtube.com **mỗi kết quả / mục feed** có một
+`ytm-bottom-sheet-renderer` đóng (là vỏ của nút ⋮). Kết quả: một nút "Cài đặt TizenTube" trong từng
+hàng, và hàng cuối nằm dưới thanh điều hướng cố định (`ytm-pivot-bar-renderer`). Sửa: dự phòng chỉ dùng
+bảng **đang mở** (`bottom-sheet-container ytm-bottom-sheet-renderer`, `[role=dialog]`,
+`ytm-menu-popup-renderer`, `.player-settings-menu`), không bao giờ chèn vào bên trong mục video
+(`ytm-media-item`, `ytm-video-with-context-renderer`, …), và xoá các mục cũ đã chèn sai. Mục chính vẫn là
+một hàng bình thường trong trang (tab "Bạn", 48 px, `scroll-margin-bottom` = 64 px +
+`env(safe-area-inset-bottom)` để cuộn tới không bị thanh dưới che).
+
+**Danh sách gọn** (module 26): khi `innerWidth/innerHeight < 1,6` hoặc `innerWidth ≤ 1000` CSS px,
+`<html>.ttm-compact`: mỗi `ytm-media-item` (kết quả tìm kiếm, feed trang chủ — `ytm-rich-item-renderer`
+bọc cùng `ytm-media-item` —, danh sách liên quan ở trang xem) thành một hàng lưới: ảnh **160×90** (16:9)
+bên trái, tiêu đề (cắt **2 dòng**) + kênh/lượt xem bên phải, nút ⋮ giữ nguyên ô 48×48 ở mép phải. Ảnh đại
+diện kênh bị ẩn (tên kênh vẫn ở dòng phụ). Hàng cao ~102 px, cả hàng vẫn là link của YouTube. Màn rộng
+(1280×480) giữ bố cục của YouTube. Tính lại khi đổi kích thước. Không làm bố cục trang xem hai cột.
+
 ## 12. Kết quả kiểm tra (không build toàn bộ)
+
+### Lượt v7e
+
+* Harness 85/85, host guard 23/23, `node --check` mọi JS.
+* Trang thật (`results_v7e.json`) **40/40** ở 427×480, 507×480, 640×720, 900×700, 1280×480, DPR 1,5:
+  không có mục cài đặt trong hàng kết quả / không giao thanh dưới (tìm kiếm, trang chủ, trang xem, tab
+  "Bạn"); tìm kiếm gọn: 5 hàng nhìn thấy ở 900×700 và 640×720 (3 ở 427/507×480), ảnh 160×90, hàng 102 px,
+  ⋮ ≥ 40 px; chạm hàng → mở trang xem; danh sách liên quan gọn; 1280×480 giữ bố cục cũ. Hồi quy v7c 41/41.
 
 ### Lượt v7c/v7d
 

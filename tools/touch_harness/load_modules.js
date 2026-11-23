@@ -14,6 +14,7 @@
     'tizentube_mobile_22_quality.js',
     'tizentube_mobile_24_audioonly.js',
     'tizentube_mobile_25_layout.js',
+    'tizentube_mobile_26_compact.js',
     'tizentube_mobile_30_settings.js',
     'tizentube_mobile_40_background.js'
   ];

@@ -552,6 +552,7 @@ action("embed_polyfilled_javascript") {
     "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_22_quality.js",
     "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_24_audioonly.js",
     "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_25_layout.js",
+    "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_26_compact.js",
     "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_30_settings.js",
     "embedded_resources/cobalt_java_script_polyfill/tizentube_mobile_40_background.js",
   ]
