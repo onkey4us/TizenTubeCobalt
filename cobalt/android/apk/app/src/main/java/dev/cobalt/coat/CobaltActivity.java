@@ -32,6 +32,7 @@ import android.os.SystemClock;
 import android.text.TextUtils;
 import android.view.Display;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
@@ -145,6 +146,18 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
   // True while the activity is stopped but kept "visible" to Chromium so audio continues.
   private boolean mBackgroundPlaybackActive;
   private boolean mInPictureInPicture;
+  // v7: WebContents hidden in onStop while audio continues (frame production stopped).
+  private boolean mFrozenForBackground;
+  // v7: native player overlay + page state for it.
+  private TizenTubeOverlay mOverlay;
+  private boolean mOnWatchPage;
+  private final int[] mOverlayParentOffset = new int[2];
+  private final java.util.Set<Integer> mConsumedKeys = new java.util.HashSet<>();
+  // Commands the page understands (module 40, 'ttm-cmd'). Never interpolate anything else.
+  private static final java.util.Set<String> PAGE_COMMANDS =
+      new java.util.HashSet<>(
+          Arrays.asList("play", "pause", "toggle", "next", "prev", "seek+10", "seek-10", "search",
+              "back"));
   private static final long MOBILE_BACK_DEBOUNCE_MS = 300;
   private long mLastMobileBackMs;
 
@@ -435,6 +448,9 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
               getStarboardBridge()
                   .cobaltMediaSession()
                   .setPlaybackListener(playing -> onTizenTubePlaybackChanged());
+              getStarboardBridge()
+                  .cobaltMediaSession()
+                  .setCommandSink(CobaltActivity.this::sendPageCommand);
             }
 
             // Load the `url` with the same shell we created above.
@@ -471,6 +487,10 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
 
   @Override
   public boolean onKeyDown(int keyCode, KeyEvent event) {
+    if (mIsMobileUi && handleTizenTubeKey(keyCode, event)) {
+      mConsumedKeys.add(keyCode);
+      return true;
+    }
     if (keyCode == KeyEvent.KEYCODE_BACK) {
       mPhysicalBackKeyPressed = true;
       if (mIsMobileUi) {
@@ -488,6 +508,9 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
 
   @Override
   public boolean onKeyUp(int keyCode, KeyEvent event) {
+    if (mConsumedKeys.remove(keyCode)) {
+      return true;  // its key down was handled by handleTizenTubeKey
+    }
     if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE || KeyboardUtils.isPartnerFallbackKey(keyCode)) {
       return super.onKeyUp(keyCode, event);
     }
@@ -713,6 +736,13 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
     } else {
       Log.i(TAG, "Do not create VideoSurfaceView.");
     }
+    if (mIsMobileUi) {
+      // v7 native overlay, above the web content (and the video SurfaceView). GONE until a
+      // tap on the player; sized to the player box reported by the page.
+      mOverlay = new TizenTubeOverlay(this, this::onOverlayAction);
+      FrameLayout.LayoutParams olp = new FrameLayout.LayoutParams(0, 0);
+      addContentView(mOverlay, olp);
+    }
     StartupGuard.getInstance().setStartupMilestone(StartupGuard.ACTIVITY_ON_START);
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -754,6 +784,34 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
                 @Override
                 public void onPagePlayingChanged(boolean playing) {
                   onTizenTubePlaybackChanged();
+                  if (mOverlay != null) {
+                    mOverlay.setPlaying(playing);
+                  }
+                }
+
+                @Override
+                public void onWatchPageChanged(boolean watchPage) {
+                  mOnWatchPage = watchPage;
+                  updateOverlayEnabled();
+                }
+
+                @Override
+                public void onPlayerRectChanged(float x, float y, float w, float h, float dpr) {
+                  if (mOverlay != null) {
+                    mOverlay.setPlayerRect(x, y, w, h, dpr);
+                  }
+                }
+
+                @Override
+                public void onPageMetadata(
+                    String title, String artist, String artworkUrl, long durationMs) {
+                  // Chromium already forwards navigator.mediaSession metadata + artwork to
+                  // CobaltMediaSession (mediaSessionMetadataChanged / ArtworkLoader); the
+                  // page copy is only a fallback while that has not arrived. Artwork is
+                  // not downloaded again here.
+                  getStarboardBridge()
+                      .cobaltMediaSession()
+                      .setFallbackMetadata(title, artist, durationMs);
                 }
               });
       mJavaScriptAndroidObjectList.add(mMobileBridge);
@@ -821,6 +879,9 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
         Log.i(TAG, "TizenTube: returning from background playback.");
       }
       mBackgroundPlaybackActive = false;
+      // v7: rendering was frozen in onStop; the regular path below (updateShellActivityVisible
+      // (true)) shows the WebContents again and frame production resumes.
+      mFrozenForBackground = false;
       MediaPlaybackService.stop(this);
       getStarboardBridge().cobaltMediaSession().setKeepActiveInBackground(false);
     }
@@ -929,11 +990,25 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
         AppEventBridge.handleConcealEvent(stopTimestamp);
       }
     } else if (mBackgroundPlaybackActive) {
-      // TizenTube background audio: keep the WebContents VISIBLE so Blink does not fire
-      // visibilitychange/hidden and Chromium does not background the renderer or suspend
-      // the media pipeline. The video SurfaceView is destroyed by Android, so the Starboard
-      // video decoder tears down its codec (video decode pauses); audio keeps playing.
+      // TizenTube background audio, v7: the app is not visible, so stop frame production to
+      // save CPU/GPU while audio continues.
+      //  - WebContents HIDDEN -> WebContentsImpl::WasHidden -> RenderWidgetHostViewAndroid::
+      //    Hide -> DelegatedFrameHost::WasHidden + RenderWidgetHostImpl::WasHidden: the
+      //    compositor stops BeginFrames for this page and Blink pauses rendering /
+      //    requestAnimationFrame. This is what actually stops frame production.
+      //  - Media keeps playing: WebMediaPlayerImpl::ShouldPausePlaybackWhenHidden() is false
+      //    for a playing audio+video element when background video playback is enabled (the
+      //    default) and --disable-background-media-suspend (mobile mode) disables the
+      //    background suspend; the Starboard renderer has no page-visibility hook.
+      //  - Page JS: module 05_visibility keeps document.hidden=false and swallows
+      //    visibilitychange, so m.youtube.com does not pause itself.
+      //  - --disable-renderer-backgrounding keeps the renderer process priority, so timers
+      //    (SponsorBlock, playlist advance) still run.
+      // Never done on onPause (split-screen focus loss) and not in PiP (onStop is not called
+      // while the PiP window is visible). onStart() shows the WebContents again.
       Log.i(TAG, "TizenTube: stopped while playing, keeping audio (mode " + mLeaveMode + ").");
+      updateShellActivityVisible(false);
+      mFrozenForBackground = true;
       MediaPlaybackService.start(this);
     } else {
       // visibility:hidden event
@@ -1141,6 +1216,7 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
       return;
     }
     mInPictureInPicture = isInPictureInPictureMode;
+    updateOverlayEnabled();
     Log.i(TAG, "TizenTube: picture-in-picture " + isInPictureInPictureMode);
     // Tell the userscript (module 25_layout) to show only the video.
     evaluateJavaScript(
@@ -1174,6 +1250,136 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
               + newConfig.screenHeightDp
               + "dp, orientation "
               + newConfig.orientation);
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // TizenTube v7: native overlay, page command channel, media / steering-wheel / DPAD keys.
+  // ---------------------------------------------------------------------------------------
+
+  /**
+   * Java -> page command channel: dispatches window 'ttm-cmd' (module 40_background), which
+   * drives m.youtube.com's #movie_player API. Works while the WebContents is hidden too.
+   */
+  void sendPageCommand(String command) {
+    if (!mIsMobileUi || !PAGE_COMMANDS.contains(command)) {
+      return;
+    }
+    evaluateJavaScript(
+        "window.dispatchEvent(new CustomEvent('ttm-cmd',{detail:'" + command + "'}))");
+  }
+
+  private void onOverlayAction(String action) {
+    if (TizenTubeOverlay.ACTION_BACK.equals(action)) {
+      // Same path as the Android Back key: TizenTube overlays, fill mode, history.back(),
+      // then background at the root.
+      handleMobileBack();
+      return;
+    }
+    if (TizenTubeOverlay.ACTION_SEARCH.equals(action) && mOverlay != null) {
+      mOverlay.hide();
+    }
+    sendPageCommand(action);
+  }
+
+  private void updateOverlayEnabled() {
+    if (mOverlay != null) {
+      mOverlay.setEnabledForPage(mOnWatchPage && !mInPictureInPicture);
+    }
+  }
+
+  @Override
+  public boolean dispatchTouchEvent(MotionEvent ev) {
+    if (mOverlay != null && mOverlay.getParent() instanceof View) {
+      // Observe only (never consumes): single tap on the player shows the overlay after the
+      // double-tap timeout; taps outside it hide it. Event coordinates are window-relative;
+      // the overlay (and the web content) live in android.R.id.content, which can be offset
+      // by insets, so convert.
+      ((View) mOverlay.getParent()).getLocationInWindow(mOverlayParentOffset);
+      mOverlay.observe(ev, mOverlayParentOffset[0], mOverlayParentOffset[1]);
+    }
+    return super.dispatchTouchEvent(ev);
+  }
+
+  private boolean isEditableFocused() {
+    ImeAdapterImpl ime = getImeAdapterImpl();
+    return ime != null && ime.focusedNodeEditable();
+  }
+
+  /**
+   * Media keys (steering wheel / headset while in the foreground; in the background they reach
+   * CobaltMediaSession's callbacks) and DPAD on watch pages. Returns true if consumed.
+   */
+  private boolean handleTizenTubeKey(int keyCode, KeyEvent event) {
+    if (event.getRepeatCount() > 0 && keyCode != KeyEvent.KEYCODE_DPAD_LEFT
+        && keyCode != KeyEvent.KEYCODE_DPAD_RIGHT) {
+      return true;  // swallow auto-repeat of handled keys
+    }
+    switch (keyCode) {
+      case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+      case KeyEvent.KEYCODE_HEADSETHOOK:
+        sendPageCommand("toggle");
+        return true;
+      case KeyEvent.KEYCODE_MEDIA_PLAY:
+        sendPageCommand("play");
+        return true;
+      case KeyEvent.KEYCODE_MEDIA_PAUSE:
+        sendPageCommand("pause");
+        return true;
+      case KeyEvent.KEYCODE_MEDIA_NEXT:
+        sendPageCommand("next");
+        return true;
+      case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+        sendPageCommand("prev");
+        return true;
+      case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+        sendPageCommand("seek+10");
+        return true;
+      case KeyEvent.KEYCODE_MEDIA_REWIND:
+        sendPageCommand("seek-10");
+        return true;
+      default:
+        break;
+    }
+    // DPAD only on a watch page and never while typing (search box etc.).
+    if (!mOnWatchPage || isEditableFocused()) {
+      return false;
+    }
+    boolean overlayShown = mOverlay != null && mOverlay.isShowing();
+    switch (keyCode) {
+      case KeyEvent.KEYCODE_DPAD_LEFT:
+        if (overlayShown) {
+          return false;  // let focus move between overlay buttons
+        }
+        sendPageCommand("seek-10");
+        return true;
+      case KeyEvent.KEYCODE_DPAD_RIGHT:
+        if (overlayShown) {
+          return false;
+        }
+        sendPageCommand("seek+10");
+        return true;
+      case KeyEvent.KEYCODE_DPAD_CENTER:
+      case KeyEvent.KEYCODE_ENTER:
+        if (overlayShown) {
+          mOverlay.restartAutoHide();
+          return false;  // activates the focused overlay button
+        }
+        sendPageCommand("toggle");
+        return true;
+      case KeyEvent.KEYCODE_DPAD_UP:
+      case KeyEvent.KEYCODE_DPAD_DOWN:
+        if (mOverlay != null) {
+          if (overlayShown) {
+            mOverlay.restartAutoHide();
+            return false;
+          }
+          mOverlay.show();
+          return true;
+        }
+        return false;
+      default:
+        return false;
     }
   }
 

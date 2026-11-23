@@ -80,6 +80,45 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
   }
 
   /**
+   * TizenTube v7: page command channel for transport actions. m.youtube.com does not register
+   * nexttrack/previoustrack/seek MediaSession handlers, so Chromium's didReceiveAction() would be
+   * a no-op for them; with a sink set they go to the page instead ('next', 'prev', 'seek+10',
+   * 'seek-10'). Play/pause keep the Chromium path (it plays/pauses the media element itself).
+   */
+  public interface CommandSink {
+    void onCommand(String command);
+  }
+
+  private CommandSink mCommandSink;
+  private String mFallbackTitle;
+  private String mFallbackArtist;
+  private long mFallbackDurationMs;
+
+  public void setCommandSink(CommandSink sink) {
+    mCommandSink = sink;
+    updatePlaybackState();
+  }
+
+  /** TizenTube v7: metadata from the page, used only while Chromium has not provided any. */
+  public void setFallbackMetadata(String title, String artist, long durationMs) {
+    mFallbackTitle = title;
+    mFallbackArtist = artist;
+    mFallbackDurationMs = durationMs;
+    if (mMetadata == null) {
+      updateMetadata();
+    }
+  }
+
+  private boolean sendCommand(String command) {
+    CommandSink sink = mCommandSink;
+    if (sink == null) {
+      return false;
+    }
+    mMainHandler.post(() -> sink.onCommand(command));
+    return true;
+  }
+
+  /**
    * TizenTube background playback: keep the MediaSession active while the activity is
    * stopped (audio continues, notification and media keys keep working).
    */
@@ -89,7 +128,7 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
 
   /** True when the page's MediaSession reports controllable, unpaused playback. */
   public boolean isPlaying() {
-    return mIsControllable && !mIsPaused && mMetadata != null;
+    return mIsControllable && !mIsPaused && (mMetadata != null || mFallbackTitle != null);
   }
 
   @Nullable
@@ -99,12 +138,12 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
 
   @Nullable
   public String getTitle() {
-    return mMetadata != null ? mMetadata.getTitle() : null;
+    return mMetadata != null ? mMetadata.getTitle() : mFallbackTitle;
   }
 
   @Nullable
   public String getArtist() {
-    return mMetadata != null ? mMetadata.getArtist() : null;
+    return mMetadata != null ? mMetadata.getArtist() : mFallbackArtist;
   }
 
   @Nullable
@@ -172,22 +211,30 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
 
           @Override
           public void onSkipToPrevious() {
-            onReceiveAction(MediaSessionAction.PREVIOUS_TRACK);
+            if (!sendCommand("prev")) {
+              onReceiveAction(MediaSessionAction.PREVIOUS_TRACK);
+            }
           }
 
           @Override
           public void onSkipToNext() {
-            onReceiveAction(MediaSessionAction.NEXT_TRACK);
+            if (!sendCommand("next")) {
+              onReceiveAction(MediaSessionAction.NEXT_TRACK);
+            }
           }
 
           @Override
           public void onFastForward() {
-            onReceiveAction(MediaSessionAction.SEEK_FORWARD);
+            if (!sendCommand("seek+10")) {
+              onReceiveAction(MediaSessionAction.SEEK_FORWARD);
+            }
           }
 
           @Override
           public void onRewind() {
-            onReceiveAction(MediaSessionAction.SEEK_BACKWARD);
+            if (!sendCommand("seek-10")) {
+              onReceiveAction(MediaSessionAction.SEEK_BACKWARD);
+            }
           }
 
           @Override
@@ -379,7 +426,7 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
         new PlaybackStateCompat.Builder().setActions(computeMediaSessionActions());
 
     int state = PlaybackStateCompat.STATE_NONE;
-    if (mMetadata != null) {
+    if (mMetadata != null || (mCommandSink != null && mFallbackTitle != null)) {
       state = mIsPaused ? PlaybackStateCompat.STATE_PAUSED : PlaybackStateCompat.STATE_PLAYING;
     }
 
@@ -427,6 +474,19 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
     }
 
     if (mMetadata == null) {
+      if (mFallbackTitle != null && !mFallbackTitle.isEmpty()) {
+        MediaMetadataCompat.Builder fb = new MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, mFallbackTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, mFallbackArtist);
+        if (mArtworkImage != null) {
+          fb.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, mArtworkImage);
+        }
+        if (mFallbackDurationMs > 0) {
+          fb.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, mFallbackDurationMs);
+        }
+        mMediaSession.setMetadata(fb.build());
+        return;
+      }
       resetMetaData();
       return;
     }
@@ -459,7 +519,17 @@ public class CobaltMediaSession implements ArtworkLoader.Callback {
   }
 
   private long computeMediaSessionActions() {
-    long actions = PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE;
+    long actions = PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE
+        | PlaybackStateCompat.ACTION_PLAY_PAUSE;
+    if (mCommandSink != null) {
+      // TizenTube: always advertise transport actions so MediaSessionCompat turns steering
+      // wheel / headset KEYCODE_MEDIA_NEXT/PREVIOUS/FAST_FORWARD/REWIND into callbacks
+      // (onMediaButtonEvent only dispatches actions present in the playback state).
+      actions |= PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+          | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+          | PlaybackStateCompat.ACTION_FAST_FORWARD
+          | PlaybackStateCompat.ACTION_REWIND;
+    }
     if (mActions != null) {
       if (mActions.contains(MediaSessionAction.PREVIOUS_TRACK)) {
         actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS;

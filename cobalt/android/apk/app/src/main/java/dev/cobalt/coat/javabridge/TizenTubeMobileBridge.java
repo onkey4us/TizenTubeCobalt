@@ -16,8 +16,13 @@ package dev.cobalt.coat.javabridge;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.os.Handler;
 import android.os.Looper;
+import dev.cobalt.media.MediaCodecUtil;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * JavaScript bridge used by the bundled TizenTube mobile userscript
@@ -49,6 +54,15 @@ public class TizenTubeMobileBridge implements CobaltJavaScriptAndroidObject {
     void onLeaveModeChanged(String mode);
 
     void onPagePlayingChanged(boolean playing);
+
+    /** v7: page is (not) a watch page; the native overlay only shows on watch pages. */
+    void onWatchPageChanged(boolean watchPage);
+
+    /** v7: visible player box in CSS px (all 0 = none) and devicePixelRatio. */
+    void onPlayerRectChanged(float x, float y, float w, float h, float dpr);
+
+    /** v7: navigator.mediaSession.metadata from the page (fallback for the MediaSession). */
+    void onPageMetadata(String title, String artist, String artworkUrl, long durationMs);
   }
 
   private final SharedPreferences mPrefs;
@@ -83,10 +97,10 @@ public class TizenTubeMobileBridge implements CobaltJavaScriptAndroidObject {
     return "TizenTubeMobile";
   }
 
-  /** Version of this bridge so the userscript can feature-detect. 2 = v6 (leave mode). */
+  /** Version of this bridge so the userscript can feature-detect. 3 = v7 (overlay glue). */
   @CobaltJavaScriptInterface
   public int getBridgeVersion() {
-    return 2;
+    return 3;
   }
 
   @CobaltJavaScriptInterface
@@ -117,5 +131,71 @@ public class TizenTubeMobileBridge implements CobaltJavaScriptAndroidObject {
 
   public boolean isPagePlaying() {
     return mPagePlaying;
+  }
+
+  private final Map<String, Boolean> mHwDecoderCache = new HashMap<>();
+
+  /**
+   * v7: whether a hardware (non-software) decoder exists for a video MIME type, e.g.
+   * "video/x-vnd.on2.vp9", "video/avc", "video/av01". Used by the userscript's codec gate:
+   * in "Tự động" mode VP9 is only allowed when the device decodes it in hardware (the X7's
+   * i.MX8QM VPU has no VP9), so YouTube falls back to H.264 instead of software VP9.
+   */
+  @CobaltJavaScriptInterface
+  public boolean hasHardwareDecoder(String mime) {
+    if (mime == null || !mime.startsWith("video/")) {
+      return false;
+    }
+    synchronized (mHwDecoderCache) {
+      Boolean cached = mHwDecoderCache.get(mime);
+      if (cached != null) {
+        return cached;
+      }
+    }
+    boolean found = false;
+    try {
+      for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
+        if (info.isEncoder() || MediaCodecUtil.isSoftwareDecoder(info)) {
+          continue;
+        }
+        for (String type : info.getSupportedTypes()) {
+          if (type.equalsIgnoreCase(mime)) {
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          break;
+        }
+      }
+    } catch (RuntimeException e) {
+      found = true;  // unknown: do not restrict
+    }
+    synchronized (mHwDecoderCache) {
+      mHwDecoderCache.put(mime, found);
+    }
+    return found;
+  }
+
+  @CobaltJavaScriptInterface
+  public void setWatchPage(boolean watchPage) {
+    mMainHandler.post(() -> mListener.onWatchPageChanged(watchPage));
+  }
+
+  @CobaltJavaScriptInterface
+  public void setPlayerRect(float x, float y, float w, float h, float dpr) {
+    if (!(dpr > 0) || Float.isNaN(x + y + w + h)) {
+      return;
+    }
+    mMainHandler.post(() -> mListener.onPlayerRectChanged(x, y, w, h, dpr));
+  }
+
+  @CobaltJavaScriptInterface
+  public void setMetadata(String title, String artist, String artworkUrl, double durationMs) {
+    final String t = title != null ? title : "";
+    final String a = artist != null ? artist : "";
+    final String u = artworkUrl != null ? artworkUrl : "";
+    final long d = Double.isNaN(durationMs) ? 0 : (long) durationMs;
+    mMainHandler.post(() -> mListener.onPageMetadata(t, a, u, d));
   }
 }
